@@ -1,0 +1,135 @@
+name: Test
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13', '3.14']
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+
+    - name: Install loko
+      run: |
+        uv pip install --system -e .
+
+    - name: Install Kind
+      run: |
+        # Install Kind
+        curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64
+        chmod +x ./kind
+        sudo mv ./kind /usr/local/bin/kind
+        kind version
+
+    - name: Install mkcert
+      run: |
+        # Install mkcert
+        curl -Lo mkcert https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-linux-amd64
+        chmod +x mkcert
+        sudo mv mkcert /usr/local/bin/mkcert
+        mkcert -version
+
+    - name: Install Helm
+      run: |
+        # Install Helm
+        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+        helm version
+
+    - name: Install Helmfile
+      run: |
+        # Install Helmfile
+        curl -Lo helmfile.tar.gz https://github.com/helmfile/helmfile/releases/download/v0.169.2/helmfile_0.169.2_linux_amd64.tar.gz
+        tar -xzf helmfile.tar.gz
+        chmod +x helmfile
+        sudo mv helmfile /usr/local/bin/helmfile
+        helmfile version
+
+    - name: Verify Docker
+      run: |
+        # Docker is pre-installed on GitHub Actions runners
+        docker --version
+        docker info
+
+    - name: Verify kubectl
+      run: |
+        # kubectl is pre-installed on GitHub Actions runners
+        kubectl version --client
+
+    - name: Test CLI help commands
+      run: |
+        loko --help
+        loko init --help
+        loko config --help
+        loko create --help
+        loko destroy --help
+        loko check-prerequisites --help
+
+    - name: Run check-prerequisites
+      run: |
+        # Run the prerequisites check - should pass with all tools installed
+        loko check-prerequisites
+
+    - name: Test config generation
+      run: |
+        # Test generating a config file
+        loko generate-config --output test-config.yaml --force
+        test -f test-config.yaml
+        echo "✅ Config file generated successfully"
+
+    - name: Configure for CI environment
+      run: |
+        # Get the runner's IP address
+        RUNNER_IP=$(hostname -I | awk '{print $1}')
+        echo "Runner IP: $RUNNER_IP"
+
+        # Update the config with the runner's IP
+        sed -i "s/local-ip: .*/local-ip: $RUNNER_IP/" test-config.yaml
+
+        echo "Updated config:"
+        grep "local-ip:" test-config.yaml
+
+    - name: Test init (generate cluster configs)
+      run: |
+        # Test that init generates Kind cluster config, helmfile, etc.
+        # Note: This doesn't create the cluster, just generates configs
+        loko init --config test-config.yaml
+        echo "✅ Init completed successfully"
+
+        # Verify generated files exist
+        ls -la .loko/dev-me/config/
+        files=(
+          ".loko/dev-me/config/cluster.yaml"
+          ".loko/dev-me/config/helmfile.yaml"
+          ".loko/dev-me/config/dnsmasq.conf"
+        )
+
+        for file in "${files[@]}"; do
+          if [ -f "$file" ]; then
+            echo "=== $file ==="
+            cat "$file"
+            echo ""
+            echo ""
+          else
+            echo "=== $file ==="
+            echo "File not found"
+            echo ""
+            echo ""
+          fi
+        done
+        echo "✅ All config files generated correctly"

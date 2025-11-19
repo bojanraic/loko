@@ -1,0 +1,228 @@
+environment:
+  # General settings
+  name: dev-me # name of the environment; drives the naming of kubernetes cluster and nodes, host containers etc
+  
+  # NOTE: Authentication and persistence are handled automatically for system services
+  # - Random passwords are generated for all database services
+  # - Persistence is configured based on storage.size settings
+  # - Passwords can be retrieved using: task kubernetes:fetch-service-secrets
+  base-dir: ${PWD}/.loko # where kubernetes logs/storage, and various config files are stored
+  expand-env-vars: true # set to false to disable variable expansion; true to enable expansion of:
+                        # - OS variables (${PWD}, ${HOME}, ${USER}) in base-dir and helm values
+                        # - loko variables (${LOCAL_DOMAIN}, ${ENV_NAME}, etc.) in helm values
+                        # Available loko variables for use in helm values:
+                        # - ${ENV_NAME}         - environment name (e.g., "dev-me")
+                        # - ${APPS_SUBDOMAIN}   - subdomain for applications (e.g., "apps")
+                        # - ${LOCAL_DOMAIN}     - local domain (e.g., "dev.me") 
+                        # - ${LOCAL_APPS_DOMAIN}- domain for applications, either APPS_SUBDOMAIN.LOCAL_DOMAIN or LOCAL_DOMAIN
+                        #                        depending on use-apps-subdomain setting (e.g., "app.dev.me" or "dev.me")
+                        # - ${LOCAL_IP}         - local IP address (e.g., "192.168.0.10")
+                        # - ${REGISTRY_NAME}    - registry name (e.g., "cr")
+                        # - ${REGISTRY_HOST}    - registry host (e.g., "cr.dev.me")
+
+  # At the moment, KinD on macOS has been tested, with a docker-compatible runtime
+  # Podman has been tried out but it is not a first-class citizen with KinD so it is not supported as of yet
+  # Linux has not been tested yet
+  provider:
+    name: kind # provider for kubernetes clusters, must be kind for now
+    runtime: docker # docker or podman for container runtime
+
+  kubernetes:
+    api-port: 6443 # port for the API server, will be exposed to the host machine as local-ip:api-port
+    image: kindest/node # image for the kind nodes
+    # renovate: datasource=docker depName=kindest/node
+    tag: v1.34.0  # tag for the kind image
+
+  nodes: # common settings for all kubernetes nodes
+    servers: 1 # number of control-plane servers/masters
+    workers: 1 # number of worker nodes
+    allow-scheduling-on-control-plane: true # whether to allow scheduling on control plane nodes even when workers exist
+    internal-components-on-control-plane: true # whether to force internal components (nginx-ingress, registry) to run only on control-plane nodes
+
+    labels: # optional: custom labels to apply to nodes
+      control-plane: # labels for ALL control-plane nodes (applied to each)
+        tier: "control"
+        environment: "dev"
+      worker: # labels for ALL worker nodes (applied to each)
+        tier: "compute"
+        environment: "dev"
+      # Alternative: specify labels per individual node (overrides global labels)
+      # individual:
+      #   control-plane-0: # labels for first control-plane node
+      #     tier: "control"
+      #     zone: "us-west-1a"
+      #   control-plane-1: # labels for second control-plane node  
+      #     tier: "control"
+      #     zone: "us-west-1b"
+      #   worker-0: # labels for first worker node
+      #     tier: "compute"
+      #     zone: "us-west-1a"
+      #   worker-1: # labels for second worker node
+      #     tier: "compute" 
+      #     zone: "us-west-1b"
+
+  local-ip: 192.168.0.10 # local ip, mapping to the host IP to use for DNS resolution and wildcard certificates
+  local-domain: dev.me # a domain name to use for custom dns resolution and wildcard certificates
+  use-apps-subdomain: true # whether to use apps subdomain for applications (false = use direct domain)
+  apps-subdomain: apps # subdomain for applications (e.g., myapp.apps.dev.me)
+  local-lb-ports: # list of ports to expose on the load balancer side, mapping to the host machine
+    - 80 # http port for nginx ingress controller
+    - 443 # https port for nginx ingress controller
+
+  registry:
+    name: cr # name, to be used in the final url for the registry, i.e. <registry.name>.<local-domain>
+    storage: # use PVC for storage
+      size: 10Gi # size of PVC  
+
+  internal-components:
+    # renovate: datasource=helm depName=app-template
+    - app-template: "4.4.0"
+
+    # renovate: datasource=helm depName=traefik repositoryUrl=https://traefik.github.io/charts
+    - traefik: "37.3.0"
+
+    # renovate: datasource=helm depName=metrics-server
+    - metrics-server: "3.13.0"
+
+    # renovate: datasource=docker depName=registry
+    - registry: "3"
+
+    # renovate: datasource=docker depName=dockurr/dnsmasq
+    - dnsmasq: "2.91"
+
+  use-service-presets: true # whether or not to use the preset values for services; leave true unless you have a good reason to override the defaults
+  run-services-on-workers-only: true # whether to force application services to run only on worker nodes (when workers > 0)
+  enable-metrics-server: false # whether to deploy metrics-server for resource monitoring and HPA
+
+  # Centralized helm repository definitions
+  helm-repositories:
+    - name: groundhog2k
+      url: https://groundhog2k.github.io/helm-charts/
+    - name: securecodebox
+      url: https://charts.securecodebox.io/
+
+  services:
+    # System services - pre-configured services with presets, ports, and storage management
+    system:
+      - name: mysql
+        enabled: false # whether or not to install this component and expose the port(s)
+        namespace: common-services
+        ports:
+          - 3306 # port to expose on the host machine
+        storage: # use PVC for storage
+          size: 10Gi # size of PVC
+        config:
+          repo:
+            ref: groundhog2k # reference to helm-repositories entry
+          chart: groundhog2k/mysql # the chart to use
+          # renovate: datasource=helm depName=mysql
+          version: 3.0.7
+          # MySQL authentication and persistence handled automatically
+
+      - name: postgres
+        enabled: true # whether or not to install this component and expose the port(s)
+        namespace: common-services
+        ports:
+          - 5432
+        storage: # use PVC for storage
+          size: 5Gi
+        config:
+          repo:
+            ref: groundhog2k # reference to helm-repositories entry
+          chart: groundhog2k/postgres # the chart to use
+          # renovate: datasource=helm depName=postgres
+          version: 1.6.0
+          # PostgreSQL authentication and persistence handled automatically
+
+      - name: mongodb
+        enabled: false # whether or not to install this component and expose the port(s)
+        namespace: common-services
+        ports:
+          - 27017 # port to expose on the host machine
+        storage: # use PVC for storage
+          size: 5Gi # size of PVC
+        config:
+          repo:
+            ref: groundhog2k # reference to helm-repositories entry
+          chart: groundhog2k/mongodb # the chart to use
+          # renovate: datasource=helm depName=mongodb
+          version: 0.7.6
+          # MongoDB authentication and persistence handled automatically
+
+      - name: rabbitmq
+        enabled: false # whether or not to install this component and expose the port(s)
+        namespace: common-services
+        ports:
+          - 5672 # port to expose on the host machine
+        storage: # use PVC for storage
+          size: 2Gi # size of PVC
+        config:
+          repo:
+            ref: groundhog2k # reference to helm-repositories entry
+          chart: groundhog2k/rabbitmq # the chart to use
+          # renovate: datasource=helm depName=rabbitmq
+          version: 2.2.1
+          values:
+            # RabbitMQ authentication handled automatically
+            ingress:
+              enabled: true
+              hostname: rmq.${LOCAL_DOMAIN}
+              annotations:
+                traefik.ingress.kubernetes.io/router.entrypoints: websecure
+                traefik.ingress.kubernetes.io/router.tls: "true"
+              tls:
+                - hosts:
+                    - rmq.${LOCAL_DOMAIN}
+
+      - name: valkey
+        enabled: false # whether or not to install this component and expose the port(s)
+        namespace: common-services
+        ports:
+          - 6379 # port to expose on the host machine
+        storage:
+          size: 1Gi
+        config:
+          repo:
+            ref: groundhog2k # reference to helm-repositories entry
+          chart: groundhog2k/valkey # the chart to use
+          # renovate: datasource=helm depName=valkey
+          version: 2.2.2
+          # Valkey persistence handled automatically (no authentication)
+
+    # User services - additional services users can add without presets
+    # Users are expected to provide:
+    #  - complete helm values configuration
+    #  - helm repository configuration (required)
+    #  - ports they want to have exposed on the host machine (optional)
+    #
+    # DNS and Ingress Structure:
+    # - System services use: service.local.domain (e.g., mysql.dev.me)
+    # - User services use: service.apps.local.domain (e.g., myapp.apps.dev.me)
+    # - Registry uses: registry.local.domain (e.g., cr.dev.me)
+    # This separation provides better security by isolating system services from user applications
+
+    user: 
+      - name: http-webhook
+        enabled: false
+        namespace: default
+        ports: [] # Optional: open up ports on host machine
+        config:
+          repo: # repo is required 
+            ref: securecodebox # reference to helm-repositories entry
+          chart: securecodebox/http-webhook
+          # renovate: datasource=helm depName=http-webhook
+          version: 4.16.0
+          values:
+            ingress:
+              enabled: true
+              ingressClassName: "traefik"
+              annotations:
+                traefik.ingress.kubernetes.io/router.entrypoints: websecure
+                traefik.ingress.kubernetes.io/router.tls: "true"
+              hosts:
+                - host: echo.${LOCAL_APPS_DOMAIN}
+                  paths:
+                    - /
+              tls:
+                - hosts:
+                    - echo.${LOCAL_APPS_DOMAIN}

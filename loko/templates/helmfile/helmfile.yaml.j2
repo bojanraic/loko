@@ -1,0 +1,262 @@
+helmDefaults:
+  createNamespace: true
+  wait: true
+  atomic: true
+  timeout: 600
+
+# Dynamic repositories from services configuration
+repositories:
+  # Core repositories for internal components
+  - name: traefik
+    url: https://traefik.github.io/charts
+  - name: bjw-s-labs
+    url: https://bjw-s-labs.github.io/helm-charts/
+  {% if deploy_metrics_server %}
+  - name: metrics-server
+    url: https://kubernetes-sigs.github.io/metrics-server/
+  {% endif %}
+
+  # Dynamic repositories from services
+  {% for repo_name, repo_url in helm_repositories.items() %}
+  - name: {{ repo_name }}
+    url: {{ repo_url }}
+  {% endfor %}
+
+releases:
+  # Traefik Ingress Controller
+  - name: traefik
+    chart: traefik/traefik
+    namespace: traefik
+    version: {{ traefik_version }}
+    values:
+      - deployment:
+          replicas: 1
+        {% if nodes.get('internal-components-on-control-plane', true) %}
+        nodeSelector:
+          ingress-ready: "true"
+        tolerations:
+          - key: node-role
+            operator: Equal
+            value: control-plane
+            effect: NoSchedule
+          - key: node-role
+            operator: Equal
+            value: master
+            effect: NoSchedule
+          - key: node-role.kubernetes.io/control-plane
+            operator: Exists
+            effect: NoSchedule
+          - key: node-role.kubernetes.io/master
+            operator: Exists
+            effect: NoSchedule
+        {% endif %}
+        ports:
+          web:
+            port: 80
+            exposedPort: 80
+            protocol: TCP
+            hostPort: 80
+          websecure:
+            port: 443
+            exposedPort: 443
+            protocol: TCP
+            hostPort: 443
+            http3:
+              enabled: false
+            tls:
+              enabled: true
+              options: ""
+              certResolver: ""
+              domains: []
+          {% for service in system_services if service.enabled %}
+          {% for port in service.ports %}
+          tcp{{ port }}:
+            port: {{ port }}
+            exposedPort: {{ port }}
+            protocol: TCP
+            hostPort: {{ port }}
+          {% endfor %}
+          {% endfor %}
+        ingressClass:
+          enabled: true
+          isDefaultClass: true
+        service:
+          type: NodePort
+        ingressRoute:
+          dashboard:
+            enabled: false
+        providers:
+          kubernetesCRD:
+            enabled: true
+            allowCrossNamespace: true
+          kubernetesIngress:
+            enabled: true
+            publishedService:
+              enabled: false
+        globalArguments:
+          - "--global.sendanonymoususage=false"
+        additionalArguments:
+          - "--serverstransport.insecureskipverify=true"
+          - "--providers.kubernetesingress.ingressclass=traefik"
+        # TLS Configuration - use wildcard cert as default for all ingresses
+        tlsOptions:
+          default:
+            minVersion: VersionTLS12
+        # Configure default TLS certificate from secret
+        tlsStore:
+          default:
+            defaultCertificate:
+              secretName: wildcard-tls
+
+
+  {% if deploy_metrics_server %}
+  # Metrics Server
+  - name: metrics-server
+    chart: metrics-server/metrics-server
+    namespace: kube-system
+    version: {{ metrics_server_version }}
+    values:
+      - args:
+          - --kubelet-insecure-tls
+          - --kubelet-preferred-address-types=InternalIP
+        {% if nodes.get('internal-components-on-control-plane', true) %}
+        nodeSelector:
+          ingress-ready: "true"
+        tolerations:
+          - key: "node-role"
+            operator: "Equal"
+            value: "control-plane"
+            effect: "NoSchedule"
+          - key: "node-role"
+            operator: "Equal"
+            value: "master"
+            effect: "NoSchedule"
+          - key: node-role.kubernetes.io/control-plane
+            operator: Exists
+            effect: NoSchedule
+          - key: node-role.kubernetes.io/master
+            operator: Exists
+            effect: NoSchedule
+        {% endif %}
+  {% endif %}
+
+  # Registry
+  - name: registry
+    namespace: registry
+    chart: bjw-s-labs/app-template
+    version: {{ app_template_version }}
+    needs:
+      - traefik/traefik
+    values:
+      - controllers:
+          registry:
+            type: statefulset
+            {% if nodes.get('internal-components-on-control-plane', true) %}
+            # Schedule on control plane for access to port mappings
+            pod:
+              nodeSelector:
+                ingress-ready: "true"
+              tolerations:
+                - key: "node-role"
+                  operator: "Equal"
+                  value: "control-plane"
+                  effect: "NoSchedule"
+                - key: "node-role"
+                  operator: "Equal"
+                  value: "master"
+                  effect: "NoSchedule"
+                - key: node-role.kubernetes.io/control-plane
+                  operator: Exists
+                  effect: NoSchedule
+                - key: node-role.kubernetes.io/master
+                  operator: Exists
+                  effect: NoSchedule
+            {% endif %}
+            containers:
+              app:
+                image:
+                  repository: registry
+                  tag: {{ registry_version }}
+        service:
+          app:
+            controller: registry
+            ports:
+              http:
+                port: 5000
+        ingress:
+          app:
+            className: traefik
+            annotations:
+              traefik.ingress.kubernetes.io/router.entrypoints: websecure
+              traefik.ingress.kubernetes.io/router.tls: "true"
+            hosts:
+              - host: {{ registry_name }}.{{ local_domain }}
+                paths:
+                  - path: /
+                    service:
+                      identifier: app
+                      port: http
+            tls:
+              - hosts:
+                - {{ registry_name }}.{{ local_domain }}        
+        persistence:
+          data:
+            enabled: true
+            size: {{ registry.storage.size }}
+            retain: true
+            type: persistentVolumeClaim
+            accessMode: ReadWriteOnce
+            globalMounts:
+              - path: /var/lib/registry
+        env:
+          REGISTRY_HTTP_ADDR: ":5000"
+          REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: /var/lib/registry
+
+  # System service releases (with presets and port management)
+  {% for service in system_services if service.enabled %}
+  - name: {{ service.name }}
+    namespace: {{ service.namespace | default(service.name) }}
+    chart: {{ service.config.chart }}
+    version: {{ service.config.version }}
+    needs:
+      # ensure traefik and registry are installed before installing {{ service.name }}
+      - traefik/traefik
+      - registry/registry
+    values:
+      - {{ service.base_values | to_yaml | indent(8) | trim }}
+      {% if service.custom_values %}
+      - {{ service.custom_values | to_yaml | indent(8) | trim }}
+      {% endif %}
+      {% if run_services_on_workers_only and nodes.workers > 0 %}
+      - nodeSelector:
+          node-role.kubernetes.io/worker: "true"
+        tolerations:
+          - key: "node-role"
+            operator: "Equal"
+            value: "worker"
+            effect: "NoSchedule"
+      {% endif %}
+  {% endfor %}
+
+  {% if user_services | selectattr('enabled') | list | length > 0 %}
+  # User service releases (without presets - user provides ports and complete values)
+  {% for service in user_services if service.enabled %}
+  - name: {{ service.name }}
+    namespace: {{ service.namespace | default(service.name) }}
+    chart: {{ service.config.chart }}
+    version: {{ service.config.version }}
+    needs:
+      - traefik/traefik
+    values:
+      - {{ service.base_values | to_yaml | indent(8) | trim }}
+      {% if run_services_on_workers_only and nodes.workers > 0 %}
+      - nodeSelector:
+          node-role.kubernetes.io/worker: "true"
+        tolerations:
+          - key: "node-role"
+            operator: "Equal"
+            value: "worker"
+            effect: "NoSchedule"
+      {% endif %}
+  {% endfor %}
+  {% endif %} 
