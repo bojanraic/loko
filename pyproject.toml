@@ -1,0 +1,44 @@
+[project]
+name = "loko"
+version = "0.1.0"
+description = "Local Kubernetes Environment Manager - Simplified local K8s development with Kind"
+authors = [
+    {name = "Bojan Raic", email = "code+loko@bojan.io"},
+]
+dependencies = [
+    "typer>=0.9.0",
+    "pydantic>=2.0.0",
+    "pyyaml>=6.0",
+    "jinja2>=3.1.0",
+    "rich>=13.0.0",
+    "shellingham>=1.5.0",
+]
+requires-python = ">=3.9"
+readme = "README.md"
+license = {text = "MIT"}
+keywords = ["kubernetes", "k8s", "kind", "local", "development", "devops", "containers"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: System :: Systems Administration",
+]
+
+[project.urls]
+Homepage = "https://github.com/bojanraic/loko"
+Repository = "https://github.com/bojanraic/loko"
+Issues = "https://github.com/bojanraic/loko/issues"
+
+[project.scripts]
+loko = "loko.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
