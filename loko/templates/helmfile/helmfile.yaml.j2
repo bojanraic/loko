@@ -43,6 +43,12 @@ releases:
             operator: Equal
             value: master
             effect: NoSchedule
+          - key: node-role.kubernetes.io/control-plane
+            operator: Exists
+            effect: NoSchedule
+          - key: node-role.kubernetes.io/master
+            operator: Exists
+            effect: NoSchedule
         {% endif %}
         ports:
           web:
@@ -125,6 +131,12 @@ releases:
             operator: "Equal"
             value: "master"
             effect: "NoSchedule"
+          - key: node-role.kubernetes.io/control-plane
+            operator: Exists
+            effect: NoSchedule
+          - key: node-role.kubernetes.io/master
+            operator: Exists
+            effect: NoSchedule
         {% endif %}
   {% endif %}
 
@@ -153,6 +165,12 @@ releases:
                   operator: "Equal"
                   value: "master"
                   effect: "NoSchedule"
+                - key: node-role.kubernetes.io/control-plane
+                  operator: Exists
+                  effect: NoSchedule
+                - key: node-role.kubernetes.io/master
+                  operator: Exists
+                  effect: NoSchedule
             {% endif %}
             containers:
               app:
