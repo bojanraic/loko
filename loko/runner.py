@@ -541,7 +541,7 @@ Domains=~{self.env.local_domain}
             
             for node in worker_nodes:
                 self.run_command(
-                    ["kubectl", "label", node, "node-role.kubernetes.io/worker=", "--overwrite"],
+                    ["kubectl", "label", node, "node-role.kubernetes.io/worker=true", "--overwrite"],
                     capture_output=True,
                     check=False
                 )
