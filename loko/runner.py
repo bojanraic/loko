@@ -2,6 +2,7 @@ import subprocess
 import shutil
 import os
 import time
+from datetime import datetime
 from typing import List, Optional
 from rich.console import Console
 from .config import RootConfig
@@ -122,14 +123,14 @@ class CommandRunner:
         """Deploy services using helmfile."""
         console.print("🔄 Deploying services...")
         helmfile_config = os.path.join(self.k8s_dir, "config", "helmfile.yaml")
-        
+
         # Prepare environment variables for helmfile
         env = os.environ.copy()
-        
+
         # Add variables that might be used in helmfile values
         apps_subdomain = self.env.apps_subdomain
         local_apps_domain = f"{apps_subdomain}.{self.env.local_domain}" if self.env.use_apps_subdomain else self.env.local_domain
-        
+
         env.update({
             'ENV_NAME': self.env.name,
             'LOCAL_DOMAIN': self.env.local_domain,
@@ -140,7 +141,42 @@ class CommandRunner:
             'USE_APPS_SUBDOMAIN': str(self.env.use_apps_subdomain).lower(),
             'LOCAL_APPS_DOMAIN': local_apps_domain,
         })
-        
+
+        # Add and update helm repositories first to ensure we have the latest chart versions
+        console.print("🔄 Adding helm repositories...")
+        repos_cmd = [
+            "helmfile",
+            "--kube-context", f"kind-{self.env.name}",
+            "--file", helmfile_config,
+            "repos"
+        ]
+
+        try:
+            subprocess.run(
+                repos_cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env
+            )
+        except subprocess.CalledProcessError as e:
+            console.print(f"[yellow]⚠️  Warning: Could not add repositories: {e.stderr}[/yellow]")
+
+        # Update all helm repositories to fetch latest chart indexes
+        console.print("🔄 Updating helm repository indexes...")
+        update_cmd = ["helm", "repo", "update"]
+
+        try:
+            subprocess.run(
+                update_cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env
+            )
+        except subprocess.CalledProcessError as e:
+            console.print(f"[yellow]⚠️  Warning: Could not update repository indexes: {e.stderr}[/yellow]")
+
         # Use sync instead of apply to avoid helm-diff issues
         cmd = [
             "helmfile",
@@ -541,7 +577,7 @@ Domains=~{self.env.local_domain}
             
             for node in worker_nodes:
                 self.run_command(
-                    ["kubectl", "label", node, "node-role.kubernetes.io/worker=", "--overwrite"],
+                    ["kubectl", "label", node, "node-role.kubernetes.io/worker=true", "--overwrite"],
                     capture_output=True,
                     check=False
                 )
@@ -600,54 +636,101 @@ Domains=~{self.env.local_domain}
             console.print(f"[yellow]⚠️  Could not setup wildcard certificate: {e}[/yellow]")
 
     def fetch_service_secrets(self):
-        """Fetch and display service secrets/credentials."""
+        """Fetch and extract service credentials to a file."""
         console.print("🔄 Fetching service credentials...")
-        
-        try:
-            found_any = False
-            
-            # Helper to check secrets in a namespace
-            def check_namespace_secrets(namespace, service_name):
-                nonlocal found_any
-                result = self.run_command(
-                    ["kubectl", "get", "secrets", "-n", namespace, "--no-headers", "-o", "custom-columns=:metadata.name"],
-                    capture_output=True,
-                    check=False
-                )
-                
-                if result.returncode == 0 and result.stdout.strip():
-                    secrets = [s.strip() for s in result.stdout.strip().split('\n') if s.strip()]
-                    # Filter out system/default secrets
-                    relevant_secrets = [
-                        s for s in secrets 
-                        if not s.startswith('default-token') 
-                        and not s.startswith('sh.helm')
-                        and not s.startswith('wildcard-')
-                    ]
-                    
-                    if relevant_secrets:
-                        console.print(f"  🔑 [bold]{service_name}[/bold] ({namespace}):")
-                        for secret in relevant_secrets:
-                            console.print(f"    • {secret}")
-                        found_any = True
 
-            # Check system services
-            if self.env.services.system:
-                for svc in self.env.services.system:
-                    if svc.enabled:
-                        ns = svc.namespace or svc.name
-                        check_namespace_secrets(ns, svc.name)
-            
-            # Check user services
-            if self.env.services.user:
-                for svc in self.env.services.user:
-                    if svc.enabled:
-                        ns = svc.namespace or svc.name
-                        check_namespace_secrets(ns, svc.name)
-            
-            if not found_any:
-                console.print("  ℹ️  No service credentials found")
-                
+        try:
+            # Service configurations mapping service name to username and Helm value path
+            service_configs = {
+                'mysql': ('root', 'settings.rootPassword.value'),
+                'postgres': ('postgres', 'settings.superuserPassword.value'),
+                'mongodb': ('root', 'settings.rootPassword'),
+                'rabbitmq': ('admin', 'authentication.password.value'),
+                'valkey': ('default', 'settings.password'),  # valkey might not have auth by default
+            }
+
+            output_file = os.path.join(self.k8s_dir, 'service-secrets.txt')
+            found_any = False
+
+            # Clear/create the output file
+            with open(output_file, 'w') as f:
+                f.write(f"# Service Credentials for {self.env.name}\n")
+                f.write(f"# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+
+            console.print("  🔍 Extracting passwords from Helm release values...")
+
+            # Get all helm releases
+            result = self.run_command(
+                ["helm", "list", "--all-namespaces", "-o", "json"],
+                capture_output=True,
+                check=False
+            )
+
+            if result.returncode != 0 or not result.stdout.strip():
+                console.print("  ℹ️  No Helm releases found. Deploy services first.")
+                return
+
+            import json
+            releases = json.loads(result.stdout)
+
+            if not releases:
+                console.print("  ℹ️  No Helm releases found. Deploy services first.")
+                return
+
+            # Process each configured service
+            for service_name, (username, value_path) in service_configs.items():
+                # Find if this service is deployed
+                release_info = next((r for r in releases if r['name'] == service_name), None)
+
+                if release_info:
+                    namespace = release_info['namespace']
+                    console.print(f"  📦 Found deployed service: {service_name} in namespace: {namespace}")
+
+                    # Get Helm values
+                    values_result = self.run_command(
+                        ["helm", "get", "values", service_name, "-n", namespace, "-o", "json"],
+                        capture_output=True,
+                        check=False
+                    )
+
+                    if values_result.returncode == 0 and values_result.stdout.strip():
+                        try:
+                            values = json.loads(values_result.stdout)
+
+                            # Navigate the nested path to get password
+                            password = values
+                            for key in value_path.split('.'):
+                                if isinstance(password, dict) and key in password:
+                                    password = password[key]
+                                else:
+                                    password = None
+                                    break
+
+                            if password and password != "null":
+                                # Write to file
+                                with open(output_file, 'a') as f:
+                                    f.write(f"Service: {service_name}\n")
+                                    f.write(f"Namespace: {namespace}\n")
+                                    f.write(f"Username: {username}\n")
+                                    f.write(f"Password: {password}\n")
+                                    f.write(f"\n")
+
+                                console.print(f"    ✅ Retrieved password for {service_name}")
+                                found_any = True
+                            else:
+                                console.print(f"    ⚠️  Password not found at path '{value_path}' for {service_name}")
+                        except json.JSONDecodeError:
+                            console.print(f"    ⚠️  Could not parse Helm values for {service_name}")
+                    else:
+                        console.print(f"    ⚠️  Could not retrieve Helm values for {service_name}")
+
+            if found_any:
+                console.print("")
+                console.print("🔑 Service credentials extracted successfully")
+                console.print(f"📝 Secrets saved to: [bold]{output_file}[/bold]")
+            else:
+                console.print("  ⚠️  No service credentials found. Services may not be deployed yet or passwords may not be in Helm values.")
+
         except Exception as e:
             console.print(f"[yellow]⚠️  Could not fetch service secrets: {e}[/yellow]")
 

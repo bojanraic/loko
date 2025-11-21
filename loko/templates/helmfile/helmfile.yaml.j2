@@ -31,15 +31,22 @@ releases:
     values:
       - deployment:
           replicas: 1
-        {% if nodes.get('allow-scheduling-on-control-plane', true) and nodes.get('internal-components-on-control-plane', true) %}
+        {% if nodes.get('internal-components-on-control-plane', true) %}
         nodeSelector:
           ingress-ready: "true"
-          node-role.kubernetes.io/control-plane: ""
         tolerations:
-          - key: node-role.kubernetes.io/master
-            operator: Exists
+          - key: node-role
+            operator: Equal
+            value: control-plane
+            effect: NoSchedule
+          - key: node-role
+            operator: Equal
+            value: master
             effect: NoSchedule
           - key: node-role.kubernetes.io/control-plane
+            operator: Exists
+            effect: NoSchedule
+          - key: node-role.kubernetes.io/master
             operator: Exists
             effect: NoSchedule
         {% endif %}
@@ -112,16 +119,24 @@ releases:
       - args:
           - --kubelet-insecure-tls
           - --kubelet-preferred-address-types=InternalIP
-        {% if nodes.get('allow-scheduling-on-control-plane', true) and nodes.get('internal-components-on-control-plane', true) %}
+        {% if nodes.get('internal-components-on-control-plane', true) %}
         nodeSelector:
-          node-role.kubernetes.io/control-plane: ""
+          ingress-ready: "true"
         tolerations:
-          - key: "node-role.kubernetes.io/control-plane"
-            operator: "Exists"
+          - key: "node-role"
+            operator: "Equal"
+            value: "control-plane"
             effect: "NoSchedule"
-          - key: "node-role.kubernetes.io/master"
-            operator: "Exists"
+          - key: "node-role"
+            operator: "Equal"
+            value: "master"
             effect: "NoSchedule"
+          - key: node-role.kubernetes.io/control-plane
+            operator: Exists
+            effect: NoSchedule
+          - key: node-role.kubernetes.io/master
+            operator: Exists
+            effect: NoSchedule
         {% endif %}
   {% endif %}
 
@@ -136,18 +151,26 @@ releases:
       - controllers:
           registry:
             type: statefulset
-            {% if nodes.get('allow-scheduling-on-control-plane', true) and nodes.get('internal-components-on-control-plane', true) %}
-            # Only schedule on control plane if explicitly allowed
+            {% if nodes.get('internal-components-on-control-plane', true) %}
+            # Schedule on control plane for access to port mappings
             pod:
               nodeSelector:
-                node-role.kubernetes.io/control-plane: ""
+                ingress-ready: "true"
               tolerations:
-                - key: "node-role.kubernetes.io/control-plane"
-                  operator: "Exists"
+                - key: "node-role"
+                  operator: "Equal"
+                  value: "control-plane"
                   effect: "NoSchedule"
-                - key: "node-role.kubernetes.io/master"
-                  operator: "Exists"
+                - key: "node-role"
+                  operator: "Equal"
+                  value: "master"
                   effect: "NoSchedule"
+                - key: node-role.kubernetes.io/control-plane
+                  operator: Exists
+                  effect: NoSchedule
+                - key: node-role.kubernetes.io/master
+                  operator: Exists
+                  effect: NoSchedule
             {% endif %}
             containers:
               app:
@@ -208,8 +231,9 @@ releases:
       - nodeSelector:
           node-role.kubernetes.io/worker: "true"
         tolerations:
-          - key: "node-role.kubernetes.io/worker"
-            operator: "Exists"
+          - key: "node-role"
+            operator: "Equal"
+            value: "worker"
             effect: "NoSchedule"
       {% endif %}
   {% endfor %}
@@ -229,8 +253,9 @@ releases:
       - nodeSelector:
           node-role.kubernetes.io/worker: "true"
         tolerations:
-          - key: "node-role.kubernetes.io/worker"
-            operator: "Exists"
+          - key: "node-role"
+            operator: "Equal"
+            value: "worker"
             effect: "NoSchedule"
       {% endif %}
   {% endfor %}

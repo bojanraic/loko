@@ -776,6 +776,21 @@ def validate(config_file: ConfigArg = "loko.yaml"):
         sys.exit(1)
 
 
+@app.command()
+def secrets(config_file: ConfigArg = "loko.yaml"):
+    """
+    Fetch and save service credentials to a file.
+    """
+    console.print("[bold blue]Fetching service credentials...[/bold blue]\n")
+    config = get_config(config_file)
+    runner = CommandRunner(config)
+
+    try:
+        runner.fetch_service_secrets()
+    except Exception as e:
+        console.print(f"[bold red]Error fetching secrets: {e}[/bold red]")
+        sys.exit(1)
+
 @app.command(name="check-prerequisites")
 def check_prerequisites():
     """
