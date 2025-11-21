@@ -122,14 +122,14 @@ class CommandRunner:
         """Deploy services using helmfile."""
         console.print("🔄 Deploying services...")
         helmfile_config = os.path.join(self.k8s_dir, "config", "helmfile.yaml")
-        
+
         # Prepare environment variables for helmfile
         env = os.environ.copy()
-        
+
         # Add variables that might be used in helmfile values
         apps_subdomain = self.env.apps_subdomain
         local_apps_domain = f"{apps_subdomain}.{self.env.local_domain}" if self.env.use_apps_subdomain else self.env.local_domain
-        
+
         env.update({
             'ENV_NAME': self.env.name,
             'LOCAL_DOMAIN': self.env.local_domain,
@@ -140,7 +140,27 @@ class CommandRunner:
             'USE_APPS_SUBDOMAIN': str(self.env.use_apps_subdomain).lower(),
             'LOCAL_APPS_DOMAIN': local_apps_domain,
         })
-        
+
+        # Update helm repositories first to ensure we have the latest chart versions
+        console.print("🔄 Updating helm repositories...")
+        update_cmd = [
+            "helmfile",
+            "--kube-context", f"kind-{self.env.name}",
+            "--file", helmfile_config,
+            "repos"
+        ]
+
+        try:
+            subprocess.run(
+                update_cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env
+            )
+        except subprocess.CalledProcessError as e:
+            console.print(f"[yellow]⚠️  Warning: Could not update repositories: {e.stderr}[/yellow]")
+
         # Use sync instead of apply to avoid helm-diff issues
         cmd = [
             "helmfile",
