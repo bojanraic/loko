@@ -208,8 +208,9 @@ releases:
       - nodeSelector:
           node-role.kubernetes.io/worker: "true"
         tolerations:
-          - key: "node-role.kubernetes.io/worker"
-            operator: "Exists"
+          - key: "node-role"
+            operator: "Equal"
+            value: "worker"
             effect: "NoSchedule"
       {% endif %}
   {% endfor %}
@@ -229,8 +230,9 @@ releases:
       - nodeSelector:
           node-role.kubernetes.io/worker: "true"
         tolerations:
-          - key: "node-role.kubernetes.io/worker"
-            operator: "Exists"
+          - key: "node-role"
+            operator: "Equal"
+            value: "worker"
             effect: "NoSchedule"
       {% endif %}
   {% endfor %}

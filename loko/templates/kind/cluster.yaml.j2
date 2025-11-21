@@ -107,7 +107,7 @@ nodes:
     kind: JoinConfiguration
     nodeRegistration:
       kubeletExtraArgs:
-        node-labels: "kubernetes.io/hostname=worker-{{ i }},node-role=worker
+        node-labels: "kubernetes.io/hostname=worker-{{ i }},node-role=worker,node-role.kubernetes.io/worker=true
         {%- if nodes.get('labels', {}).get('individual', {}).get('worker-' + i|string) -%}
           {%- for key, value in nodes.labels.individual['worker-' + i|string].items() -%}
             ,{{ key }}={{ value }}
