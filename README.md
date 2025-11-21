@@ -9,7 +9,8 @@ A Python CLI utility to manage local Kubernetes environments with Kind, providin
 ## Features
 
 - 🚀 **Easy Setup**: Initialize local Kubernetes clusters with a single command
-- 🔄 **Version Management**: Upgrade component versions from upstream without rebuilding
+- 🔄 **Smart Version Management**: Upgrade component versions using Renovate-style comments
+- 💾 **Automatic Backups**: Config files are automatically backed up before upgrades
 - 🎨 **Custom Templates**: Use your own Jinja2 templates for configuration generation
 - ⚙️ **Extensive CLI Overrides**: Override any configuration value via command-line flags
 - 📦 **Built-in Local Registry**: Local container registry with TLS support
@@ -22,6 +23,7 @@ A Python CLI utility to manage local Kubernetes environments with Kind, providin
 - 🛠️ **Helm-based Deployment**: Deploy services from public repositories (groundhog2k, etc.)
 - 🗂️ **Centralized Helm Repos**: Define repositories once, reference everywhere
 - 📋 **OCI Chart Validation**: Local registry testing with OCI artifact storage
+- 🔑 **Secret Management**: Automatically fetch and save service credentials
 
 ## Prerequisites
 
@@ -96,9 +98,10 @@ uv run loko --help
 - `loko validate` - Validate the environment
 - `loko check-prerequisites` - Check if required tools are installed
 
-### Configuration
+### Configuration & Secrets
 - `loko generate-config` - Generate default loko.yaml
-- `loko config upgrade` - Upgrade component versions from upstream
+- `loko config upgrade` - Upgrade component versions using Renovate comments
+- `loko secrets` - Fetch and display service credentials
 - `loko config presets` - View available service presets (coming soon)
 
 ## Checking Cluster Status
@@ -115,6 +118,99 @@ This will display:
 - **Container Status**: Status of all related containers (nodes, DNS, etc.)
 - **Node Status**: List of all nodes with their roles and status
 - **DNS Status**: Status of the local DNS service
+
+## Version Management & Upgrades
+
+Loko uses Renovate-style comments in your configuration file to track and upgrade component versions. This approach allows you to:
+- Keep component versions up-to-date
+- Track version sources directly in your config
+- Automatically query Docker Hub and Helm repositories for latest versions
+
+### How It Works
+
+Add Renovate comments above the version fields in your `loko.yaml`:
+
+```yaml
+kubernetes:
+  image: kindest/node
+  # renovate: datasource=docker depName=kindest/node
+  tag: v1.34.0
+
+internal-components:
+  # renovate: datasource=helm depName=traefik repositoryUrl=https://traefik.github.io/charts
+  - traefik: "37.3.0"
+
+services:
+  system:
+    - name: mysql
+      config:
+        chart: groundhog2k/mysql
+        # renovate: datasource=helm depName=mysql
+        version: 3.0.7
+```
+
+### Supported Datasources
+
+- **Docker Hub** (`datasource=docker`): Fetches latest tags from Docker Hub
+- **Helm Repositories** (`datasource=helm`): Fetches latest chart versions from Helm repos
+
+### Running Upgrades
+
+```bash
+loko config upgrade
+```
+
+This will:
+1. 🔍 Scan your config for Renovate comments
+2. 🌐 Query each datasource for the latest version
+3. 💾 Create a backup (`loko-prev.yaml`)
+4. ✅ Update versions in place
+5. 📋 Show a summary of changes
+
+Example output:
+```
+Upgrading component versions...
+
+🔍 Checking kindest/node (docker)...
+🔍 Checking traefik (helm)...
+🔍 Checking mysql (helm)...
+
+Updates found:
+  kindest/node: v1.32.0 → v1.34.0
+  traefik: 31.2.0 → 37.3.0
+  mysql: 3.0.5 → 3.0.7
+
+💾 Backup created: loko-prev.yaml
+✅ Updated 3 version(s) in loko.yaml
+```
+
+### Restoring from Backup
+
+If an upgrade causes issues, easily revert:
+
+```bash
+mv loko-prev.yaml loko.yaml
+```
+
+## Managing Service Credentials
+
+Service credentials (database passwords, etc.) are automatically generated during deployment. To view them:
+
+```bash
+loko secrets
+```
+
+This fetches credentials from the cluster and displays them. Credentials are also saved to:
+```
+<base-dir>/<env-name>/service-secrets.txt
+```
+
+Example services with auto-generated credentials:
+- MySQL (root password)
+- PostgreSQL (postgres password)
+- MongoDB (root password)
+- RabbitMQ (admin password)
+- Valkey (default password)
 
 ## Directory Structure
 
@@ -180,6 +276,7 @@ Once the environment is running, services are accessible through:
 
 3. **Service Credentials**:
    - Passwords are automatically generated and stored in `<local-dir>/<env-name>/service-secrets.txt`
+   - Or fetch them with: `loko secrets`
 
 ### Using the Local Container Registry
 
@@ -246,44 +343,44 @@ environment:
   name: string                    # Name of the environment
   base-dir: string                # Base directory for storage
   expand-env-vars: boolean        # Whether to expand OS and k8s-env variables
-  
+
   # Centralized repository definitions
   helm-repositories: array        # List of Helm repositories
-  
+
   # Provider configuration
   provider:
     name: string                  # Provider name (currently only "kind" supported)
     runtime: string               # Container runtime (docker or podman)
-  
+
   # Kubernetes configuration
   kubernetes:
     api-port: integer             # API server port
     image: string                 # Node image
     tag: string                   # Node image tag
-  
+
   # Node configuration
   nodes:
     servers: integer              # Number of control-plane nodes
     workers: integer              # Number of worker nodes
     allow-scheduling-on-control-plane: boolean
     internal-components-on-control-plane: boolean
-  
+
   # Network configuration
   local-ip: string                # Local IP for DNS resolution
   local-domain: string            # Domain name
   local-lb-ports: array           # Load balancer ports
   use-apps-subdomain: boolean     # Use apps subdomain
   apps-subdomain: string          # Subdomain for apps
-  
+
   # Registry configuration
   registry:
     name: string
     storage:
       size: string
-  
+
   # Internal components
   internal-components: array      # List of internal components with versions
-  
+
   # Service configuration
   use-service-presets: boolean    # Whether to use service presets
   run-services-on-workers-only: boolean
@@ -316,10 +413,15 @@ See `loko init --help` for all available overrides.
 3. **Service Access Issues**
    - Validate environment: `loko validate`
    - Verify ingress: `kubectl get ingress -A`
+   - Check credentials: `loko secrets`
 
 4. **OCI Registry Issues**
    - Test registry connectivity: `docker pull cr.dev.me/test:latest`
    - Run validation: `loko validate`
+
+5. **Version Upgrade Issues**
+   - Restore from backup: `mv loko-prev.yaml loko.yaml`
+   - Check Renovate comment syntax in config file
 
 ## Development
 
@@ -342,4 +444,3 @@ uv run loko init --help
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
