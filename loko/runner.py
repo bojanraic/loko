@@ -141,14 +141,29 @@ class CommandRunner:
             'LOCAL_APPS_DOMAIN': local_apps_domain,
         })
 
-        # Update helm repositories first to ensure we have the latest chart versions
-        console.print("🔄 Updating helm repositories...")
-        update_cmd = [
+        # Add and update helm repositories first to ensure we have the latest chart versions
+        console.print("🔄 Adding helm repositories...")
+        repos_cmd = [
             "helmfile",
             "--kube-context", f"kind-{self.env.name}",
             "--file", helmfile_config,
             "repos"
         ]
+
+        try:
+            subprocess.run(
+                repos_cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env
+            )
+        except subprocess.CalledProcessError as e:
+            console.print(f"[yellow]⚠️  Warning: Could not add repositories: {e.stderr}[/yellow]")
+
+        # Update all helm repositories to fetch latest chart indexes
+        console.print("🔄 Updating helm repository indexes...")
+        update_cmd = ["helm", "repo", "update"]
 
         try:
             subprocess.run(
@@ -159,7 +174,7 @@ class CommandRunner:
                 env=env
             )
         except subprocess.CalledProcessError as e:
-            console.print(f"[yellow]⚠️  Warning: Could not update repositories: {e.stderr}[/yellow]")
+            console.print(f"[yellow]⚠️  Warning: Could not update repository indexes: {e.stderr}[/yellow]")
 
         # Use sync instead of apply to avoid helm-diff issues
         cmd = [
