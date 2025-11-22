@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import List, Optional
 from rich.console import Console
 from .config import RootConfig
+from .utils import get_dns_container_name
 
 console = Console()
 
@@ -33,6 +34,25 @@ class CommandRunner:
                     console.print(f"[red]{e.stderr}[/red]")
                 raise
             return e
+
+    def list_containers(self, name_filter: Optional[str] = None, all_containers: bool = False,
+                       quiet: bool = False, status_filter: Optional[str] = None,
+                       format_expr: Optional[str] = None, check: bool = True) -> List[str]:
+        """List containers with optional filters. Returns list of container IDs or names."""
+        cmd = [self.runtime, "ps"]
+        if all_containers:
+            cmd.append("-a")
+        if quiet:
+            cmd.append("-q")
+        if name_filter:
+            cmd.extend(["--filter", f"name={name_filter}"])
+        if status_filter:
+            cmd.extend(["--filter", f"status={status_filter}"])
+        if format_expr:
+            cmd.extend(["--format", format_expr])
+
+        result = self.run_command(cmd, capture_output=True, check=check)
+        return [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
 
     def check_runtime(self):
         """Check if container runtime is running."""
@@ -81,7 +101,7 @@ class CommandRunner:
 
     def ensure_network(self):
         """Ensure container network exists."""
-        network_name = "loko-net" # Default kind network
+        network_name = "kind" # Default kind network
         console.print(f"🔄 Checking for '{network_name}' network...")
         
         try:
@@ -108,12 +128,8 @@ class CommandRunner:
         config_file = os.path.join(self.k8s_dir, "config", "cluster.yaml")
         cmd = ["kind", "create", "cluster", "--name", self.env.name, "--config", config_file]
         
-        # Set custom network
-        env = os.environ.copy()
-        env["KIND_EXPERIMENTAL_DOCKER_NETWORK"] = "loko-net"
-        
         try:
-            subprocess.run(cmd, check=True, env=env, text=True, capture_output=False)
+            subprocess.run(cmd, check=True, text=True, capture_output=False)
         except subprocess.CalledProcessError as e:
             console.print(f"[bold red]Error creating cluster: {e}[/bold red]")
             raise
@@ -203,22 +219,17 @@ class CommandRunner:
     def start_dnsmasq(self):
         """Start dnsmasq container."""
         console.print("🔄 Starting DNS service...")
-        container_name = "loko-dns"
-        
-        # Check if running
-        try:
-            self.run_command([self.runtime, "ps", "-q", "-f", f"name={container_name}"], capture_output=True)
-            # If we get here, we might need to check output, but for now let's assume if it exists we restart or leave it
-            # Simpler logic: remove and recreate to ensure config update
+        container_name = get_dns_container_name(self.env.name)
+
+        # Check if running and remove if exists to ensure config update
+        if self.list_containers(name_filter=container_name, quiet=True, check=False):
             self.run_command([self.runtime, "rm", "-f", container_name], check=False, capture_output=True)
-        except:
-            pass
 
         config_path = os.path.join(self.k8s_dir, "config", "dnsmasq.conf")
         cmd = [
             self.runtime, "run", "-d",
             "--name", container_name,
-            "--network", "loko-net",
+            "--network", "kind",
             "--restart", "unless-stopped",
             "-p", "53:53/udp",
             "-p", "53:53/tcp",
@@ -366,8 +377,8 @@ Domains=~{self.env.local_domain}
     def inject_dns_nameserver(self):
         """Inject DNS container IP into cluster nodes' resolv.conf."""
         console.print("🔄 Injecting DNS nameserver into cluster nodes...")
-        
-        dns_container = "loko-dns"
+
+        dns_container = get_dns_container_name(self.env.name)
         
         # Get DNS container IP
         try:
@@ -389,29 +400,15 @@ Domains=~{self.env.local_domain}
         
         # Get all cluster node containers
         try:
-            result = self.run_command(
-                [self.runtime, "ps", "-q", "--filter", f"name={self.env.name}"],
-                capture_output=True
-            )
-            node_ids = [n.strip() for n in result.stdout.strip().split('\n') if n.strip()]
-            
+            node_ids = self.list_containers(name_filter=self.env.name, quiet=True)
+
             # Filter out DNS container
-            dns_id = self.run_command(
-                [self.runtime, "ps", "-q", "--filter", f"name={dns_container}"],
-                capture_output=True
-            ).stdout.strip()
-            
-            # Filter out load balancer if it exists
-            lb_container = f"{self.env.name}-external-load-balancer"
-            lb_result = self.run_command(
-                [self.runtime, "ps", "-q", "--filter", f"name={lb_container}"],
-                capture_output=True,
-                check=False
-            )
-            lb_id = lb_result.stdout.strip() if lb_result.returncode == 0 else ""
-            
-            # Remove DNS and LB from node list
-            node_ids = [n for n in node_ids if n != dns_id and (not lb_id or n != lb_id)]
+            dns_ids = self.list_containers(name_filter=dns_container, quiet=True)
+            dns_id = dns_ids[0] if dns_ids else None
+
+            # Remove DNS container from node list
+            if dns_id:
+                node_ids = [n for n in node_ids if n != dns_id]
             
             if not node_ids:
                 console.print("[yellow]⚠️  No cluster nodes found[/yellow]")

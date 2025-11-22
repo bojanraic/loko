@@ -23,3 +23,7 @@ def deep_merge(source: Dict[str, Any], destination: Dict[str, Any]) -> Dict[str,
         else:
             destination[key] = value
     return destination
+
+def get_dns_container_name(environment_name: str) -> str:
+    """Get DNS container name for the given environment."""
+    return f"{environment_name}-dns"

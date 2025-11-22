@@ -12,7 +12,7 @@ from pathlib import Path
 from importlib.metadata import metadata
 
 from .config import RootConfig
-from .utils import load_config
+from .utils import load_config, get_dns_container_name
 from .generator import ConfigGenerator
 from .runner import CommandRunner
 
@@ -87,6 +87,76 @@ RegistryNameArg = Annotated[Optional[str], typer.Option("--registry-name", help=
 RegistryStorageArg = Annotated[Optional[str], typer.Option("--registry-storage", help="Override registry storage size")]
 ServicesOnWorkersArg = Annotated[Optional[bool], typer.Option("--services-on-workers/--no-services-on-workers", help="Force services to run on workers only")]
 
+def _apply_config_overrides(config: RootConfig, **overrides) -> None:
+    """Apply CLI overrides to configuration."""
+    # Environment overrides
+    if overrides.get('name'):
+        config.environment.name = overrides['name']
+    if overrides.get('domain'):
+        config.environment.local_domain = overrides['domain']
+    if overrides.get('local_ip'):
+        config.environment.local_ip = overrides['local_ip']
+    if overrides.get('apps_subdomain'):
+        config.environment.apps_subdomain = overrides['apps_subdomain']
+    if overrides.get('base_dir'):
+        config.environment.base_dir = overrides['base_dir']
+
+    # Node overrides
+    if overrides.get('workers') is not None:
+        config.environment.nodes.workers = overrides['workers']
+    if overrides.get('control_planes') is not None:
+        config.environment.nodes.servers = overrides['control_planes']
+    if overrides.get('schedule_on_control') is not None:
+        config.environment.nodes.allow_scheduling_on_control_plane = overrides['schedule_on_control']
+    if overrides.get('internal_on_control') is not None:
+        config.environment.nodes.internal_components_on_control_plane = overrides['internal_on_control']
+
+    # Provider overrides
+    if overrides.get('runtime'):
+        config.environment.provider.runtime = overrides['runtime']
+
+    # Kubernetes overrides
+    if overrides.get('k8s_version'):
+        config.environment.kubernetes.tag = overrides['k8s_version']
+    if overrides.get('k8s_api_port') is not None:
+        config.environment.kubernetes.api_port = overrides['k8s_api_port']
+
+    # Registry overrides
+    if overrides.get('registry_name'):
+        config.environment.registry.name = overrides['registry_name']
+    if overrides.get('registry_storage'):
+        config.environment.registry.storage["size"] = overrides['registry_storage']
+
+    # Load balancer overrides
+    if overrides.get('lb_ports'):
+        config.environment.local_lb_ports = overrides['lb_ports']
+
+    # Feature flags
+    if overrides.get('service_presets') is not None:
+        config.environment.use_service_presets = overrides['service_presets']
+    if overrides.get('metrics_server') is not None:
+        config.environment.enable_metrics_server = overrides['metrics_server']
+    if overrides.get('expand_vars') is not None:
+        config.environment.expand_env_vars = overrides['expand_vars']
+    if overrides.get('services_on_workers') is not None:
+        config.environment.run_services_on_workers_only = overrides['services_on_workers']
+
+def _update_service_state(config: RootConfig, service_names: Optional[List[str]], enabled: bool) -> None:
+    """Update enabled state for services."""
+    if not service_names:
+        return
+
+    for svc_name in service_names:
+        found = False
+        if config.environment.services and config.environment.services.system:
+            for svc in config.environment.services.system:
+                if svc.name == svc_name:
+                    svc.enabled = enabled
+                    found = True
+                    break
+        if not found:
+            console.print(f"[yellow]Warning: Service '{svc_name}' not found in system services.[/yellow]")
+
 def get_config(
     config_path: str,
     name: Optional[str] = None,
@@ -114,73 +184,37 @@ def get_config(
     if not os.path.exists(config_path):
         console.print(f"[bold red]Configuration file '{config_path}' not found.[/bold red]")
         sys.exit(1)
-    
-    config = load_config(config_path)
-    
-    # Apply overrides
-    if name:
-        config.environment.name = name
-    if domain:
-        config.environment.local_domain = domain
-    if workers is not None:
-        config.environment.nodes.workers = workers
-    if control_planes is not None:
-        config.environment.nodes.servers = control_planes
-    if runtime:
-        config.environment.provider.runtime = runtime
-    if local_ip:
-        config.environment.local_ip = local_ip
-    if k8s_version:
-        config.environment.kubernetes.tag = k8s_version
-    if lb_ports:
-        config.environment.local_lb_ports = lb_ports
-    if apps_subdomain:
-        config.environment.apps_subdomain = apps_subdomain
-    if service_presets is not None:
-        config.environment.use_service_presets = service_presets
-    if metrics_server is not None:
-        config.environment.enable_metrics_server = metrics_server
-    if base_dir:
-        config.environment.base_dir = base_dir
-    if expand_vars is not None:
-        config.environment.expand_env_vars = expand_vars
-    if k8s_api_port is not None:
-        config.environment.kubernetes.api_port = k8s_api_port
-    if schedule_on_control is not None:
-        config.environment.nodes.allow_scheduling_on_control_plane = schedule_on_control
-    if internal_on_control is not None:
-        config.environment.nodes.internal_components_on_control_plane = internal_on_control
-    if registry_name:
-        config.environment.registry.name = registry_name
-    if registry_storage:
-        config.environment.registry.storage["size"] = registry_storage
-    if services_on_workers is not None:
-        config.environment.run_services_on_workers_only = services_on_workers
-        
-    if enable_services:
-        for svc_name in enable_services:
-            found = False
-            if config.environment.services and config.environment.services.system:
-                for svc in config.environment.services.system:
-                    if svc.name == svc_name:
-                        svc.enabled = True
-                        found = True
-                        break
-            if not found:
-                console.print(f"[yellow]Warning: Service '{svc_name}' not found in system services.[/yellow]")
 
-    if disable_services:
-        for svc_name in disable_services:
-            found = False
-            if config.environment.services and config.environment.services.system:
-                for svc in config.environment.services.system:
-                    if svc.name == svc_name:
-                        svc.enabled = False
-                        found = True
-                        break
-            if not found:
-                console.print(f"[yellow]Warning: Service '{svc_name}' not found in system services.[/yellow]")
-        
+    config = load_config(config_path)
+
+    # Apply CLI overrides
+    _apply_config_overrides(
+        config,
+        name=name,
+        domain=domain,
+        workers=workers,
+        control_planes=control_planes,
+        runtime=runtime,
+        local_ip=local_ip,
+        k8s_version=k8s_version,
+        lb_ports=lb_ports,
+        apps_subdomain=apps_subdomain,
+        service_presets=service_presets,
+        metrics_server=metrics_server,
+        base_dir=base_dir,
+        expand_vars=expand_vars,
+        k8s_api_port=k8s_api_port,
+        schedule_on_control=schedule_on_control,
+        internal_on_control=internal_on_control,
+        registry_name=registry_name,
+        registry_storage=registry_storage,
+        services_on_workers=services_on_workers,
+    )
+
+    # Update service states
+    _update_service_state(config, enable_services, True)
+    _update_service_state(config, disable_services, False)
+
     return config
 
 @app.command()
@@ -304,18 +338,21 @@ def destroy(config_file: ConfigArg = "loko.yaml"):
     console.print("[bold red]Destroying environment...[/bold red]")
     config = get_config(config_file)
     runner = CommandRunner(config)
-    
+
+    cluster_name = config.environment.name
+    runtime = config.environment.provider.runtime
+
     # Delete cluster
-    runner.run_command(["kind", "delete", "cluster", "--name", config.environment.name])
-    
-    # Remove containers
-    for container in ["loko-dns"]:
-        runner.run_command([config.environment.provider.runtime, "rm", "-f", container], check=False)
-        
+    runner.run_command(["kind", "delete", "cluster", "--name", cluster_name])
+
+    # Remove DNS container
+    dns_container = get_dns_container_name(cluster_name)
+    runner.run_command([runtime, "rm", "-f", dns_container], check=False)
+
     # Remove resolver file
     runner.remove_resolver_file()
-        
-    console.print(f"✅ Environment '{config.environment.name}' destroyed")
+
+    console.print(f"✅ Environment '{cluster_name}' destroyed")
 
 @app.command()
 def recreate(
@@ -404,25 +441,18 @@ def start(config_file: ConfigArg = "loko.yaml"):
     
     # Get all cluster-related containers
     try:
-        result = runner.run_command(
-            [runtime, "ps", "-a", "--filter", f"name={cluster_name}", "--format", "{{.Names}}"],
-            capture_output=True
-        )
-        containers = [c.strip() for c in result.stdout.strip().split('\n') if c.strip()]
-        
+        containers = runner.list_containers(name_filter=cluster_name, all_containers=True, format_expr="{{.Names}}")
+
         if not containers:
             console.print(f"[yellow]No containers found for cluster '{cluster_name}'[/yellow]")
             console.print("Run 'loko create' first to create the environment")
             sys.exit(1)
-        
+
         # Check if all are already running
         all_running = True
         for container in containers:
-            result = runner.run_command(
-                [runtime, "ps", "--filter", f"name={container}", "--filter", "status=running", "-q"],
-                capture_output=True
-            )
-            if not result.stdout.strip():
+            running = runner.list_containers(name_filter=container, status_filter="running", quiet=True, check=False)
+            if not running:
                 all_running = False
                 break
         
@@ -457,24 +487,17 @@ def stop(config_file: ConfigArg = "loko.yaml"):
     
     # Get all cluster-related containers
     try:
-        result = runner.run_command(
-            [runtime, "ps", "-a", "--filter", f"name={cluster_name}", "--format", "{{.Names}}"],
-            capture_output=True
-        )
-        containers = [c.strip() for c in result.stdout.strip().split('\n') if c.strip()]
-        
+        containers = runner.list_containers(name_filter=cluster_name, all_containers=True, format_expr="{{.Names}}")
+
         if not containers:
             console.print(f"[yellow]No containers found for cluster '{cluster_name}'[/yellow]")
             return
-        
+
         # Check if all are already stopped
         all_stopped = True
         for container in containers:
-            result = runner.run_command(
-                [runtime, "ps", "--filter", f"name={container}", "--filter", "status=running", "-q"],
-                capture_output=True
-            )
-            if result.stdout.strip():
+            running = runner.list_containers(name_filter=container, status_filter="running", quiet=True, check=False)
+            if running:
                 all_stopped = False
                 break
         
@@ -596,31 +619,24 @@ def status(config_file: ConfigArg = "loko.yaml"):
         
         # DNS Service
         console.print("[bold]🔍 DNS Service:[/bold]")
-        dns_container = "loko-dns"
-        result = runner.run_command(
-            [runtime, "ps", "--filter", f"name={dns_container}", "--format", "{{.Names}}\t{{.Status}}"],
-            capture_output=True, check=False
-        )
-        if result.stdout.strip():
-            name, status = result.stdout.strip().split('\t', 1)
+        dns_container = get_dns_container_name(cluster_name)
+        dns_status = runner.list_containers(name_filter=dns_container, format_expr="{{.Names}}\t{{.Status}}", check=False)
+        if dns_status:
+            name, status = dns_status[0].split('\t', 1)
             console.print(f"├── Container: {name}")
             console.print(f"└── Status: {status}\n")
         else:
             console.print("└── [yellow]DNS container not running[/yellow]\n")
-        
+
         # Container Status
-        result = runner.run_command(
-            [runtime, "ps", "-a", "--filter", f"name={cluster_name}", "--format", "{{.Names}}\t{{.Status}}"],
-            capture_output=True
-        )
-        
-        if result.stdout.strip():
+        containers_status = runner.list_containers(name_filter=cluster_name, all_containers=True, format_expr="{{.Names}}\t{{.Status}}")
+
+        if containers_status:
             console.print("[bold]📦 Container Status:[/bold]")
-            lines = result.stdout.strip().split('\n')
-            for idx, line in enumerate(lines):
+            for idx, line in enumerate(containers_status):
                 if line.strip():
                     name, status = line.split('\t', 1)
-                    prefix = "└──" if idx == len(lines) - 1 else "├──"
+                    prefix = "└──" if idx == len(containers_status) - 1 else "├──"
                     if 'Up' in status:
                         console.print(f"{prefix} [green]✅ {name}[/green]: {status}")
                     else:
@@ -692,13 +708,10 @@ def validate(config_file: ConfigArg = "loko.yaml"):
     
     # 3. Check DNS container
     console.print("\n[bold]3. Checking DNS service...[/bold]")
-    dns_container = "loko-dns"
+    dns_container = get_dns_container_name(cluster_name)
     try:
-        result = runner.run_command(
-            [runtime, "ps", "--filter", f"name={dns_container}", "--filter", "status=running", "-q"],
-            capture_output=True
-        )
-        if result.stdout.strip():
+        dns_running = runner.list_containers(name_filter=dns_container, status_filter="running", quiet=True, check=False)
+        if dns_running:
             console.print(f"  [green]✅ DNS container is running[/green]")
         else:
             console.print(f"  [red]❌ DNS container is not running[/red]")
