@@ -911,99 +911,327 @@ def generate_config(
     shutil.copy(template_path, output)
     console.print(f"[bold green]Generated default configuration at '{output}'[/bold green]")
 
+def _parse_renovate_comment(comment: str) -> Optional[dict]:
+    """
+    Parse a renovate comment and extract datasource, depName, and repositoryUrl.
+
+    Example:
+        # renovate: datasource=docker depName=kindest/node
+        # renovate: datasource=helm depName=traefik repositoryUrl=https://traefik.github.io/charts
+    """
+    if 'renovate:' not in comment:
+        return None
+
+    result = {}
+
+    # Extract datasource
+    datasource_match = re.search(r'datasource=(\w+)', comment)
+    if datasource_match:
+        result['datasource'] = datasource_match.group(1)
+
+    # Extract depName
+    depname_match = re.search(r'depName=([\w\-/\.]+)', comment)
+    if depname_match:
+        result['depName'] = depname_match.group(1)
+
+    # Extract repositoryUrl (optional)
+    repo_match = re.search(r'repositoryUrl=(https?://[^\s]+)', comment)
+    if repo_match:
+        result['repositoryUrl'] = repo_match.group(1)
+
+    return result if 'datasource' in result and 'depName' in result else None
+
+
+def _fetch_latest_docker_version(dep_name: str) -> Optional[str]:
+    """
+    Fetch the latest version of a Docker image from Docker Hub or registry.
+    """
+    try:
+        # Handle official images (no slash) vs user/org images
+        if '/' not in dep_name:
+            # Official Docker library images
+            url = f"https://registry.hub.docker.com/v2/repositories/library/{dep_name}/tags?page_size=100"
+        else:
+            # User or organization images
+            url = f"https://registry.hub.docker.com/v2/repositories/{dep_name}/tags?page_size=100"
+
+        import json
+        # Add User-Agent header to avoid 403 errors
+        req = urllib.request.Request(
+            url,
+            headers={
+                'User-Agent': 'loko/0.1.0 (https://github.com/bojanraic/loko)',
+                'Accept': 'application/json'
+            }
+        )
+
+        with urllib.request.urlopen(req) as response:
+            data = json.loads(response.read())
+
+        # Filter out non-version tags and sort
+        tags = []
+        for tag_info in data.get('results', []):
+            tag = tag_info.get('name', '')
+            # Skip tags like 'latest', 'nightly', 'dev', etc.
+            if tag and not any(skip in tag.lower() for skip in ['latest', 'nightly', 'dev', 'rc', 'beta', 'alpha']):
+                # Prefer semantic versions (e.g., v1.31.2, 1.31.2)
+                if re.match(r'^v?\d+', tag):
+                    tags.append(tag)
+
+        # Return the first tag (most recent)
+        return tags[0] if tags else None
+
+    except Exception as e:
+        console.print(f"[yellow]Warning: Could not fetch Docker version for {dep_name}: {e}[/yellow]")
+        return None
+
+
+def _fetch_latest_helm_version(dep_name: str, repository_url: Optional[str] = None) -> Optional[str]:
+    """
+    Fetch the latest version of a Helm chart from a Helm repository.
+    """
+    try:
+        # Default Helm chart repositories
+        default_repos = {
+            'app-template': 'https://bjw-s-labs.github.io/helm-charts',
+            'traefik': 'https://traefik.github.io/charts',
+            'metrics-server': 'https://kubernetes-sigs.github.io/metrics-server',
+            'mysql': 'https://groundhog2k.github.io/helm-charts',
+            'postgres': 'https://groundhog2k.github.io/helm-charts',
+            'mongodb': 'https://groundhog2k.github.io/helm-charts',
+            'rabbitmq': 'https://groundhog2k.github.io/helm-charts',
+            'valkey': 'https://groundhog2k.github.io/helm-charts',
+            'http-webhook': 'https://charts.securecodebox.io',
+        }
+
+        # Use provided repository URL or fall back to defaults
+        repo_url = repository_url or default_repos.get(dep_name)
+
+        if not repo_url:
+            console.print(f"[yellow]Warning: No repository URL found for {dep_name}[/yellow]")
+            return None
+
+        # Fetch index.yaml from Helm repository
+        index_url = f"{repo_url.rstrip('/')}/index.yaml"
+
+        import yaml
+        import time
+
+        # Add User-Agent header and small delay to avoid rate limiting
+        req = urllib.request.Request(
+            index_url,
+            headers={
+                'User-Agent': 'loko/0.1.0 (https://github.com/bojanraic/loko)',
+                'Accept': 'application/x-yaml, text/yaml, */*'
+            }
+        )
+
+        # Small delay to avoid rate limiting
+        time.sleep(0.5)
+
+        with urllib.request.urlopen(req) as response:
+            index_data = yaml.safe_load(response.read())
+
+        # Get chart entries
+        entries = index_data.get('entries', {})
+        chart_versions = entries.get(dep_name, [])
+
+        if not chart_versions:
+            console.print(f"[yellow]Warning: No versions found for chart {dep_name}[/yellow]")
+            return None
+
+        # Charts are usually sorted by version in descending order
+        # Get the latest non-prerelease version
+        for version_info in chart_versions:
+            version = version_info.get('version', '')
+            # Skip pre-release versions
+            if version and not any(pre in version.lower() for pre in ['-rc', '-beta', '-alpha', '-dev']):
+                return version
+
+        # If no stable version found, return the first one
+        return chart_versions[0].get('version') if chart_versions else None
+
+    except Exception as e:
+        console.print(f"[yellow]Warning: Could not fetch Helm version for {dep_name}: {e}[/yellow]")
+        return None
+
+
+def _fetch_latest_version(renovate_info: dict) -> Optional[str]:
+    """
+    Fetch the latest version based on renovate datasource type.
+    """
+    datasource = renovate_info.get('datasource')
+    dep_name = renovate_info.get('depName')
+
+    if datasource == 'docker':
+        return _fetch_latest_docker_version(dep_name)
+    elif datasource == 'helm':
+        return _fetch_latest_helm_version(dep_name, renovate_info.get('repositoryUrl'))
+    else:
+        console.print(f"[yellow]Warning: Unsupported datasource type: {datasource}[/yellow]")
+        return None
+
+
+def _walk_yaml_for_renovate(data, updates, path="", processed_comments=None):
+    """
+    Recursively walk YAML structure looking for renovate comments.
+    Only processes each comment once and associates it with the correct value.
+    """
+    from ruamel.yaml.comments import CommentedMap, CommentedSeq
+
+    if processed_comments is None:
+        processed_comments = set()
+
+    if isinstance(data, CommentedMap):
+        keys = list(data.keys())
+        for i, key in enumerate(keys):
+            value = data[key]
+            current_path = f"{path}.{key}" if path else str(key)
+
+            # Only check for renovate comments on scalar values (not nested structures)
+            if not isinstance(value, (CommentedMap, CommentedSeq)):
+                renovate_info = None
+
+                # Check if the PREVIOUS key has a comment in position [2] (after that key)
+                # That comment should apply to THIS (current) key
+                if i > 0 and hasattr(data, 'ca') and data.ca.items:
+                    prev_key = keys[i - 1]
+                    prev_comment_token = data.ca.items.get(prev_key)
+                    # Position [2] is "after" - contains comments after the previous key's value
+                    if prev_comment_token and len(prev_comment_token) > 2 and prev_comment_token[2]:
+                        comment_obj = prev_comment_token[2]
+                        if comment_obj and hasattr(comment_obj, 'value'):
+                            comment_text = comment_obj.value
+                            comment_id = (id(data), prev_key, 'after_to', key)
+                            if comment_id not in processed_comments:
+                                parsed = _parse_renovate_comment(comment_text)
+                                if parsed:
+                                    renovate_info = parsed
+                                    processed_comments.add(comment_id)
+
+                if renovate_info:
+                    updates.append((current_path, key, renovate_info, value, data))
+
+            # Recurse into nested structures
+            if isinstance(value, (CommentedMap, CommentedSeq)):
+                _walk_yaml_for_renovate(value, updates, current_path, processed_comments)
+
+    elif isinstance(data, CommentedSeq):
+        for idx, item in enumerate(data):
+            current_path = f"{path}[{idx}]"
+
+            # For list items that are dicts with single key-value (like "- traefik: 37.3.0")
+            if isinstance(item, CommentedMap) and len(item) == 1:
+                item_key = list(item.keys())[0]
+                item_value = item[item_key]
+
+                renovate_info = None
+
+                # For the first item, check the sequence's comment
+                if idx == 0 and hasattr(data, 'ca') and hasattr(data.ca, 'comment'):
+                    if data.ca.comment and len(data.ca.comment) > 1 and data.ca.comment[1]:
+                        comment_list = data.ca.comment[1]
+                        for comment_obj in (comment_list if isinstance(comment_list, list) else [comment_list]):
+                            if comment_obj and hasattr(comment_obj, 'value'):
+                                comment_text = comment_obj.value
+                                comment_id = (id(data), 'seq_comment', idx)
+                                if comment_id not in processed_comments:
+                                    parsed = _parse_renovate_comment(comment_text)
+                                    if parsed:
+                                        renovate_info = parsed
+                                        processed_comments.add(comment_id)
+                                        break
+
+                # For subsequent items, check the previous item's key comment (position [2])
+                if not renovate_info and idx > 0:
+                    prev_item = data[idx - 1]
+                    if isinstance(prev_item, CommentedMap) and len(prev_item) == 1:
+                        prev_key = list(prev_item.keys())[0]
+                        if hasattr(prev_item, 'ca') and prev_item.ca.items:
+                            comment_token = prev_item.ca.items.get(prev_key)
+                            if comment_token and len(comment_token) > 2 and comment_token[2]:
+                                comment_obj = comment_token[2]
+                                if comment_obj and hasattr(comment_obj, 'value'):
+                                    comment_text = comment_obj.value
+                                    comment_id = (id(prev_item), prev_key, 'after')
+                                    if comment_id not in processed_comments:
+                                        parsed = _parse_renovate_comment(comment_text)
+                                        if parsed:
+                                            renovate_info = parsed
+                                            processed_comments.add(comment_id)
+
+                if renovate_info:
+                    updates.append((current_path, item_key, renovate_info, item_value, item))
+
+            # Recurse into more complex nested structures
+            elif isinstance(item, (CommentedMap, CommentedSeq)):
+                _walk_yaml_for_renovate(item, updates, current_path, processed_comments)
+
+
+
 @config_app.command("upgrade")
 def config_upgrade(
-    config_file: ConfigArg = "k8s-env.yaml",
-    upstream_url: Annotated[Optional[str], typer.Option(help="URL to fetch upstream versions from")] = None
+    config_file: ConfigArg = "loko.yaml",
 ):
     """
-    Upgrade component versions in config file from upstream.
+    Upgrade component versions in config file by checking renovate comments.
+
+    This command reads renovate-style comments in the config file and queries
+    the appropriate datasources (Docker Hub, Helm repositories) to find the
+    latest versions of components.
     """
     console.print("[bold blue]Upgrading component versions...[/bold blue]\n")
-    
+
     if not os.path.exists(config_file):
         console.print(f"[red]Error: Config file '{config_file}' not found[/red]")
         sys.exit(1)
-    
-    # Determine upstream URL
-    if upstream_url is None:
-        upstream_url = f"{get_repository_url()}/loko/templates/versions.yaml"
-    
-    console.print(f"📥 Fetching versions from: {upstream_url}")
-    
+
     try:
-        # Fetch upstream versions
-        import urllib.request
-        with urllib.request.urlopen(upstream_url) as response:
-            upstream_versions = yaml.safe_load(response.read())
-        
-        console.print("✅ Fetched upstream versions\n")
-        
-        # Load current config
+        from ruamel.yaml import YAML
+
+        # Load YAML with comment preservation
+        yaml = YAML()
+        yaml.preserve_quotes = True
+        yaml.default_flow_style = False
+
         with open(config_file, 'r') as f:
-            config_data = yaml.safe_load(f)
-        
-        updates = []
-        
-        # Update Kubernetes version
-        if 'environment' in config_data and 'kubernetes' in config_data['environment']:
-            old_version = config_data['environment']['kubernetes'].get('version', 'unknown')
-            new_version = upstream_versions['kubernetes']['version']
-            if old_version != new_version:
-                config_data['environment']['kubernetes']['version'] = new_version
-                updates.append(f"  kubernetes: {old_version} → {new_version}")
-        
-        # Update internal components (chart_version only)
-        if 'environment' in config_data and 'internal_components' in config_data['environment']:
-            for component_name, component_data in config_data['environment']['internal_components'].items():
-                if component_name in upstream_versions['internal_components']:
-                    upstream = upstream_versions['internal_components'][component_name]
-                    
-                    # Update chart_version
-                    old_chart = component_data.get('chart_version', 'unknown')
-                    new_chart = upstream['chart_version']
-                    if old_chart != new_chart:
-                        component_data['chart_version'] = new_chart
-                        updates.append(f"  {component_name} (chart): {old_chart} → {new_chart}")
-        
-        # Update system services (chart_version only)
-        if 'environment' in config_data and 'services' in config_data['environment'] and 'system' in config_data['environment']['services']:
-            for service in config_data['environment']['services']['system']:
-                service_name = service.get('name')
-                if service_name in upstream_versions['system_services']:
-                    upstream = upstream_versions['system_services'][service_name]
-                    
-                    # Update chart_version
-                    old_chart = service.get('chart_version', 'unknown')
-                    new_chart = upstream['chart_version']
-                    if old_chart != new_chart:
-                        service['chart_version'] = new_chart
-                        updates.append(f"  {service_name} (chart): {old_chart} → {new_chart}")
-        
-        # Update registry (chart_version only)
-        if 'environment' in config_data and 'registry' in config_data['environment']:
-            if 'registry' in upstream_versions:
-                upstream = upstream_versions['registry']
-                
-                old_chart = config_data['environment']['registry'].get('chart_version', 'unknown')
-                new_chart = upstream['chart_version']
-                if old_chart != new_chart:
-                    config_data['environment']['registry']['chart_version'] = new_chart
-                    updates.append(f"  registry (chart): {old_chart} → {new_chart}")
-        
-        if updates:
-            console.print("[bold green]Updates found:[/bold green]")
-            for update in updates:
+            data = yaml.load(f)
+
+        # Find all renovate comments and their associated values
+        updates_to_check = []
+        _walk_yaml_for_renovate(data, updates_to_check)
+
+        # Check each one for updates
+        updates_made = []
+        for path, key, renovate_info, current_value, parent in updates_to_check:
+            console.print(f"🔍 Checking {renovate_info['depName']} ({renovate_info['datasource']})...")
+
+            # Fetch latest version
+            latest_version = _fetch_latest_version(renovate_info)
+
+            if latest_version and str(current_value) != latest_version:
+                # Update the value in the YAML structure
+                parent[key] = latest_version
+                updates_made.append(f"  {renovate_info['depName']}: {current_value} → {latest_version}")
+
+        if updates_made:
+            console.print("\n[bold green]Updates found:[/bold green]")
+            for update in updates_made:
                 console.print(update)
-            
-            # Write updated config
+
+            # Create backup before writing changes
+            backup_file = config_file.rsplit('.', 1)[0] + '-prev.' + config_file.rsplit('.', 1)[1]
+            shutil.copy(config_file, backup_file)
+            console.print(f"\n💾 Backup created: {backup_file}")
+
+            # Write updated config back
             with open(config_file, 'w') as f:
-                yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
-            
-            console.print(f"\n✅ Updated {len(updates)} version(s) in {config_file}")
+                yaml.dump(data, f)
+
+            console.print(f"✅ Updated {len(updates_made)} version(s) in {config_file}")
         else:
             console.print("[green]✅ All versions are up to date[/green]")
-        
+
     except Exception as e:
         console.print(f"[red]Error upgrading config: {e}[/red]")
         import traceback
