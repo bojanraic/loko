@@ -5,6 +5,12 @@
     ],
     "packageRules": [
         {
+            "matchCategories": [
+                "python"
+            ],
+            "enabled": true
+        },
+        {
             "matchManagers": [
                 "github-actions"
             ],
@@ -24,9 +30,6 @@
             "automergeType": "pr"
         }
     ],
-    "python": {
-        "enabled": true
-    },
     "schedule": [
         "before 6am on Monday"
     ]
