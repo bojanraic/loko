@@ -211,7 +211,7 @@ environment:
             ref: securecodebox # reference to helm-repositories entry
           chart: securecodebox/http-webhook
           # renovate: datasource=helm depName=http-webhook repositoryUrl=https://charts.securecodebox.io
-          version: 4.16.0
+          version: 5.2.0
           values:
             ingress:
               enabled: true
