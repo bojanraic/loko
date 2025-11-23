@@ -148,7 +148,7 @@ services:
     - name: mysql
       config:
         chart: groundhog2k/mysql
-        # renovate: datasource=helm depName=mysql
+        # renovate: datasource=helm depName=mysql repositoryUrl=https://groundhog2k.github.io/helm-charts
         version: 3.0.7
 ```
 
