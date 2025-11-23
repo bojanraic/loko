@@ -36,11 +36,11 @@
     "customManagers": [
         {
             "customType": "regex",
-            "fileMatch": [
-                "^loko/templates/.*\\.yaml$",
-                "^loko/templates/.*\\.example$",
-                "^loko\\.yaml$",
-                "^loko-.*\\.yaml$"
+            "managerFilePatterns": [
+                "/^loko/templates/.*\\.yaml$/",
+                "/^loko/templates/.*\\.example$/",
+                "/^loko\\.yaml$/",
+                "/^loko-.*\\.yaml$/"
             ],
             "matchStrings": [
                 "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+) repositoryUrl=(?<registryUrl>\\S+)\\s+- [^:]+:\\s+\"(?<currentValue>[^\"]+)\"",
