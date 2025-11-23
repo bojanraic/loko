@@ -920,21 +920,144 @@ def generate_config(
     force: Annotated[bool, typer.Option("--force", "-f", help="Overwrite existing file")] = False
 ):
     """
-    Generate a default configuration file.
+    Generate a default configuration file with auto-detected local IP.
     """
     template_path = Path(__file__).parent / "templates" / "loko.yaml.example"
-    
+
     if not template_path.exists():
         console.print("[bold red]Error: Default configuration template not found.[/bold red]")
         sys.exit(1)
-        
+
     if os.path.exists(output) and not force:
         if not typer.confirm(f"File '{output}' already exists. Overwrite?"):
             console.print("[yellow]Operation cancelled.[/yellow]")
             sys.exit(0)
-        
-    shutil.copy(template_path, output)
-    console.print(f"[bold green]Generated default configuration at '{output}'[/bold green]")
+
+    # Auto-detect local IP
+    detected_ip = _detect_local_ip()
+
+    # Read template and replace IP
+    with open(template_path, 'r') as f:
+        content = f.read()
+
+    # Replace the hardcoded IP with detected IP
+    content = re.sub(
+        r'local-ip:\s+\d+\.\d+\.\d+\.\d+',
+        f'local-ip: {detected_ip}',
+        content
+    )
+
+    # Write to output file
+    with open(output, 'w') as f:
+        f.write(content)
+
+    console.print(f"[bold green]Generated configuration at '{output}'[/bold green]")
+    console.print(f"[cyan]Detected local IP: {detected_ip}[/cyan]")
+    console.print("[dim]You can modify the local-ip setting in the config file if needed.[/dim]")
+
+
+def _get_ip_via_default_route() -> Optional[str]:
+    """
+    Get local IP by finding the interface with the default route.
+    Works on both Linux and macOS.
+    """
+    import platform
+
+    try:
+        system = platform.system()
+
+        if system == "Linux":
+            # Use ip route to find default interface
+            result = subprocess.run(
+                ["ip", "route", "get", "1.1.1.1"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                # Parse output like: "1.1.1.1 via 192.168.1.1 dev eth0 src 192.168.1.100"
+                match = re.search(r'src\s+(\d+\.\d+\.\d+\.\d+)', result.stdout)
+                if match:
+                    return match.group(1)
+
+        elif system == "Darwin":  # macOS
+            # Use route get to find the IP used for routing
+            result = subprocess.run(
+                ["route", "-n", "get", "1.1.1.1"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                # Parse output for "interface:" and then get IP from that interface
+                match = re.search(r'interface:\s+(\S+)', result.stdout)
+                if match:
+                    interface = match.group(1)
+                    # Get IP from the interface using ifconfig
+                    ifconfig_result = subprocess.run(
+                        ["ifconfig", interface],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    if ifconfig_result.returncode == 0:
+                        # Look for inet address
+                        ip_match = re.search(r'inet\s+(\d+\.\d+\.\d+\.\d+)', ifconfig_result.stdout)
+                        if ip_match:
+                            return ip_match.group(1)
+
+    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+        pass
+
+    return None
+
+
+def _get_ip_via_socket() -> Optional[str]:
+    """
+    Get local IP by opening a UDP socket to a public DNS server.
+    No data is actually sent.
+    """
+    import socket
+
+    try:
+        # Create a UDP socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # Connect to Google's public DNS (no data sent with UDP)
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+        return local_ip
+    except Exception:
+        pass
+
+    return None
+
+
+def _detect_local_ip() -> str:
+    """
+    Detect local IP address using multiple methods.
+    Prefers default route method, uses socket method as fallback.
+    Returns a sensible default if both fail.
+    """
+    ip_via_route = _get_ip_via_default_route()
+    ip_via_socket = _get_ip_via_socket()
+
+    # If both methods agree, use that IP
+    if ip_via_route and ip_via_socket and ip_via_route == ip_via_socket:
+        return ip_via_route
+
+    # Prefer default route method
+    if ip_via_route:
+        return ip_via_route
+
+    # Fall back to socket method
+    if ip_via_socket:
+        return ip_via_socket
+
+    # Last resort: return a common default
+    console.print("[yellow]Warning: Could not auto-detect local IP. Using default 192.168.1.100[/yellow]")
+    return "192.168.1.100"
+
 
 def _parse_renovate_comment(comment: str) -> Optional[dict]:
     """
