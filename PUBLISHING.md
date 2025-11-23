@@ -8,6 +8,37 @@ The project uses a two-stage publishing process:
 1. **TestPyPI** - Test the package in a safe environment
 2. **PyPI** - Publish to production after verification
 
+## Quick Start: Testing Installations
+
+After publishing to TestPyPI or PyPI, test the package installation:
+
+### Recommended: Using uv (10-100x faster)
+```bash
+# From TestPyPI
+uv tool install --index-url https://test.pypi.org/simple/ \
+                --extra-index-url https://pypi.org/simple/ \
+                loko
+
+# From PyPI (production)
+uv tool install loko
+
+# Verify
+loko --help
+```
+
+### Alternative: Using pip
+```bash
+# From TestPyPI
+pip install --index-url https://test.pypi.org/simple/ \
+            --extra-index-url https://pypi.org/simple/ \
+            loko
+
+# From PyPI (production)
+pip install loko
+```
+
+> **Note:** `uv tool install` is recommended for CLI tools like `loko` because it creates an isolated environment and automatically adds the tool to your PATH.
+
 ## Prerequisites
 
 ### 1. TestPyPI Account Setup
@@ -142,6 +173,30 @@ Follow [Semantic Versioning](https://semver.org/):
 ## Testing Published Packages
 
 ### From TestPyPI
+
+#### Using uv (Recommended - 10-100x faster)
+```bash
+# Install as a CLI tool (recommended for loko)
+uv tool install --index-url https://test.pypi.org/simple/ \
+                --extra-index-url https://pypi.org/simple/ \
+                loko
+
+# Or install in current environment
+uv pip install --index-url https://test.pypi.org/simple/ \
+               --extra-index-url https://pypi.org/simple/ \
+               loko
+
+# Verify
+loko --help
+loko --version
+
+# Install specific version (e.g., dev build)
+uv tool install --index-url https://test.pypi.org/simple/ \
+                --extra-index-url https://pypi.org/simple/ \
+                loko==0.1.0.dev1
+```
+
+#### Using pip (Traditional)
 ```bash
 # Install
 pip install --index-url https://test.pypi.org/simple/ \
@@ -154,6 +209,27 @@ loko --version
 ```
 
 ### From PyPI (Production)
+
+#### Using uv (Recommended)
+```bash
+# Install as a CLI tool (isolated, automatically added to PATH)
+uv tool install loko
+
+# Or install in current environment
+uv pip install loko
+
+# Verify
+loko --help
+loko --version
+
+# Upgrade to latest version
+uv tool install --upgrade loko
+
+# Uninstall
+uv tool uninstall loko
+```
+
+#### Using pip (Traditional)
 ```bash
 # Install
 pip install loko
@@ -161,6 +237,22 @@ pip install loko
 # Verify
 loko --help
 loko --version
+```
+
+### Why use `uv tool install`?
+
+For CLI tools like `loko`, `uv tool install` is recommended because:
+- **Isolated environment**: No dependency conflicts with other tools
+- **Automatic PATH setup**: Immediately available system-wide
+- **Faster**: 10-100x faster than pip
+- **Clean uninstall**: Easy to remove without affecting other packages
+
+```bash
+# Example workflow with uv
+uv tool install loko        # Install
+loko --help                 # Use immediately
+uv tool list                # See all installed tools
+uv tool uninstall loko      # Clean removal
 ```
 
 ## Troubleshooting
@@ -197,3 +289,5 @@ loko --version
 - [TestPyPI Documentation](https://test.pypi.org/)
 - [GitHub Actions Publishing](https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python#publishing-to-package-registries)
 - [Trusted Publishing](https://docs.pypi.org/trusted-publishers/)
+- [uv Documentation](https://docs.astral.sh/uv/)
+- [uv Tool Guide](https://docs.astral.sh/uv/guides/tools/)

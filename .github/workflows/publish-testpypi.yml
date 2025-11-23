@@ -61,7 +61,14 @@ jobs:
         repository-url: https://test.pypi.org/legacy/
         password: ${{ secrets.TEST_PYPI_API_TOKEN }}
 
-    - name: Installation test command
+    - name: Installation test commands
       run: |
-        echo "To test installation from TestPyPI, run:"
-        echo "pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ loko"
+        echo "✅ Package published to TestPyPI!"
+        echo ""
+        echo "To test installation from TestPyPI:"
+        echo ""
+        echo "Using uv (recommended):"
+        echo "  uv tool install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ loko"
+        echo ""
+        echo "Using pip:"
+        echo "  pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ loko"
