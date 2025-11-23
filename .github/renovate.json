@@ -32,5 +32,14 @@
     ],
     "schedule": [
         "before 6am on Monday"
+    ],
+    "regexManagers": [
+        {
+            "fileMatch": ["^loko/templates/.*\\.yaml$", "^loko/templates/.*\\.example$"],
+            "matchStrings": [
+                "# renovate: datasource=(?<datasource>.*?) depName=(?<depName>.*?)\\s+.*?:\\s+\"(?<currentValue>.*?)\"",
+                "# renovate: datasource=(?<datasource>.*?) depName=(?<depName>.*?) repositoryUrl=(?<registryUrl>.*?)\\s+.*?:\\s+\"(?<currentValue>.*?)\""
+            ]
+        }
     ]
 }
