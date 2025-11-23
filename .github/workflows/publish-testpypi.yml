@@ -48,6 +48,8 @@ jobs:
     environment:
       name: testpypi
       url: https://test.pypi.org/project/loko/
+    permissions:
+      id-token: write
 
     steps:
     - uses: actions/download-artifact@v4
