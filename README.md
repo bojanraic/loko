@@ -1,10 +1,14 @@
-# Loko
+# LoKO - Local Kubernetes Oasis - simplified Kubernetes development environments
 
 [![PyPI version](https://badge.fury.io/py/loko.svg)](https://badge.fury.io/py/loko)
 [![Python Versions](https://img.shields.io/pypi/pyversions/loko.svg)](https://pypi.org/project/loko/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A Python CLI utility to manage local Kubernetes environments with Kind, providing simplified configuration management, version upgrades, and extensive customization options.
+<div align="center">
+  <img src="loko-logo.svg" alt="LoKO Logo" width="200" height="200">
+</div>
+
+A Python CLI utility to manage local Kubernetes environments with Kind, providing simplified configuration management, version upgrades, DNS, wildcard certificates, local container registry, and extensive customization options.
 
 ## Features
 
@@ -22,13 +26,12 @@ A Python CLI utility to manage local Kubernetes environments with Kind, providin
 - 🔧 **Service Presets**: Pre-configured settings for common services (MySQL, PostgreSQL, Valkey, etc.)
 - 🛠️ **Helm-based Deployment**: Deploy services from public repositories (groundhog2k, etc.)
 - 🗂️ **Centralized Helm Repos**: Define repositories once, reference everywhere
-- 📋 **OCI Chart Validation**: Local registry testing with OCI artifact storage
-- 🔑 **Secret Management**: Automatically fetch and save service credentials
+- 🔑 **Automatic Secrets Management**: Automatically generate, fetch and save service credentials
 
 ## Prerequisites
 
 - Python 3.9 or higher
-- Docker or Podman
+- Docker
 - [Kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
 - [mkcert](https://github.com/FiloSottile/mkcert#installation) (for HTTPS certificates)
 - [Helm](https://helm.sh/docs/intro/install/)

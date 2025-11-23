@@ -1,0 +1,59 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle for branding -->
+  <defs>
+    <linearGradient id="lokoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0066cc;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0052a3;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- Main Kubernetes helm with local indicator -->
+  <g filter="url(#shadow)">
+    <!-- Helm wheel (Kubernetes-inspired) -->
+    <circle cx="100" cy="100" r="70" fill="url(#lokoGradient)" opacity="0.95"/>
+
+    <!-- Outer ring segments -->
+    <g stroke="white" stroke-width="3" fill="none" opacity="0.8">
+      <!-- Top spoke -->
+      <line x1="100" y1="35" x2="100" y2="50" />
+      <!-- Right spoke -->
+      <line x1="150" y1="100" x2="135" y2="100" />
+      <!-- Bottom spoke -->
+      <line x1="100" y1="165" x2="100" y2="150" />
+      <!-- Left spoke -->
+      <line x1="50" y1="100" x2="65" y2="100" />
+      <!-- Diagonal spokes -->
+      <line x1="135" y1="65" x2="125" y2="75" />
+      <line x1="135" y1="135" x2="125" y2="125" />
+      <line x1="65" y1="135" x2="75" y2="125" />
+      <line x1="65" y1="65" x2="75" y2="75" />
+    </g>
+
+    <!-- Inner helm circle -->
+    <circle cx="100" cy="100" r="45" fill="none" stroke="white" stroke-width="2.5" opacity="0.9"/>
+
+    <!-- Center circle -->
+    <circle cx="100" cy="100" r="25" fill="white" opacity="0.95"/>
+
+    <!-- Local indicator - home icon in center -->
+    <g fill="#0066cc">
+      <!-- Roof (triangle) -->
+      <path d="M 100 87 L 88 98 L 112 98 Z" fill="#0066cc"/>
+      <!-- House body (rectangle) -->
+      <rect x="88" y="98" width="24" height="15" fill="#0066cc"/>
+      <!-- Door -->
+      <rect x="97" y="104" width="6" height="9" fill="white" opacity="0.6"/>
+      <!-- Window -->
+      <rect x="89" y="101" width="5" height="5" fill="white" opacity="0.6"/>
+    </g>
+
+    <!-- Accent dots at cardinal points -->
+    <circle cx="100" cy="35" r="3" fill="white" opacity="0.8"/>
+    <circle cx="165" cy="100" r="3" fill="white" opacity="0.8"/>
+    <circle cx="100" cy="165" r="3" fill="white" opacity="0.8"/>
+    <circle cx="35" cy="100" r="3" fill="white" opacity="0.8"/>
+  </g>
+</svg>
