@@ -34,7 +34,7 @@ def get_repository_url() -> str:
 
 app = typer.Typer(
     name="loko",
-    help="Local Kubernetes Environment Manager",
+    help="Local Kubernetes Environment Manager - Create and manage local K8s clusters with Kind, DNS via dnsmasq, SSL certificates via mkcert, and service deployment via Helm/Helmfile. Perfect for local development without cloud dependencies.",
     add_completion=True,
     no_args_is_help=True,
 )
@@ -892,9 +892,21 @@ def check_prerequisites():
     console.print("\n[bold]Summary:[/bold]")
     required_tools = [name for name, info in tools.items() if info["required"]]
     required_installed = sum(1 for name in required_tools if results.get(name, False))
-    
+
     if runtime_found and required_installed >= len([t for t in required_tools if t not in ["docker", "podman"]]) + 1:
         console.print("[bold green]✅ All required tools are installed![/bold green]")
+
+        # Additional note about NSS/libnss for certificate trust
+        console.print("\n[bold]Additional Requirements:[/bold]")
+        console.print("📝 [yellow]NSS/libnss[/yellow] - Required for trusting self-signed certificates in browsers")
+        console.print("   mkcert uses NSS to install certificates in Firefox and other browsers")
+        console.print("   Install via package manager:")
+        console.print("     • Ubuntu/Debian: [cyan]sudo apt install libnss3-tools[/cyan]")
+        console.print("     • Fedora/RHEL: [cyan]sudo dnf install nss-tools[/cyan]")
+        console.print("     • Arch: [cyan]sudo pacman -S nss[/cyan]")
+        console.print("     • macOS: NSS is included with Firefox")
+        console.print("   Without NSS, mkcert will only work for system-wide cert stores (Chrome, curl)")
+
         return 0
     else:
         console.print("[bold red]❌ Some required tools are missing.[/bold red]")
