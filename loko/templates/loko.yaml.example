@@ -75,13 +75,13 @@ environment:
       size: 10Gi # size of PVC  
 
   internal-components:
-    # renovate: datasource=helm depName=app-template
+    # renovate: datasource=helm depName=app-template repositoryUrl=https://bjw-s-labs.github.io/helm-charts
     - app-template: "4.4.0"
 
     # renovate: datasource=helm depName=traefik repositoryUrl=https://traefik.github.io/charts
     - traefik: "37.4.0"
 
-    # renovate: datasource=helm depName=metrics-server
+    # renovate: datasource=helm depName=metrics-server repositoryUrl=https://kubernetes-sigs.github.io/metrics-server
     - metrics-server: "3.13.0"
 
     # renovate: datasource=docker depName=registry
@@ -115,7 +115,7 @@ environment:
           repo:
             ref: groundhog2k # reference to helm-repositories entry
           chart: groundhog2k/mysql # the chart to use
-          # renovate: datasource=helm depName=mysql
+          # renovate: datasource=helm depName=mysql repositoryUrl=https://groundhog2k.github.io/helm-charts
           version: 3.0.7
           # MySQL authentication and persistence handled automatically
 
@@ -130,7 +130,7 @@ environment:
           repo:
             ref: groundhog2k # reference to helm-repositories entry
           chart: groundhog2k/postgres # the chart to use
-          # renovate: datasource=helm depName=postgres
+          # renovate: datasource=helm depName=postgres repositoryUrl=https://groundhog2k.github.io/helm-charts
           version: 1.6.0
           # PostgreSQL authentication and persistence handled automatically
 
@@ -145,7 +145,7 @@ environment:
           repo:
             ref: groundhog2k # reference to helm-repositories entry
           chart: groundhog2k/mongodb # the chart to use
-          # renovate: datasource=helm depName=mongodb
+          # renovate: datasource=helm depName=mongodb repositoryUrl=https://groundhog2k.github.io/helm-charts
           version: 0.7.6
           # MongoDB authentication and persistence handled automatically
 
@@ -160,7 +160,7 @@ environment:
           repo:
             ref: groundhog2k # reference to helm-repositories entry
           chart: groundhog2k/rabbitmq # the chart to use
-          # renovate: datasource=helm depName=rabbitmq
+          # renovate: datasource=helm depName=rabbitmq repositoryUrl=https://groundhog2k.github.io/helm-charts
           version: 2.2.1
           values:
             # RabbitMQ authentication handled automatically
@@ -185,7 +185,7 @@ environment:
           repo:
             ref: groundhog2k # reference to helm-repositories entry
           chart: groundhog2k/valkey # the chart to use
-          # renovate: datasource=helm depName=valkey
+          # renovate: datasource=helm depName=valkey repositoryUrl=https://groundhog2k.github.io/helm-charts
           version: 2.2.2
           # Valkey persistence handled automatically (no authentication)
 
@@ -210,7 +210,7 @@ environment:
           repo: # repo is required 
             ref: securecodebox # reference to helm-repositories entry
           chart: securecodebox/http-webhook
-          # renovate: datasource=helm depName=http-webhook
+          # renovate: datasource=helm depName=http-webhook repositoryUrl=https://charts.securecodebox.io
           version: 4.16.0
           values:
             ingress:
