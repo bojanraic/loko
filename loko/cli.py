@@ -804,6 +804,19 @@ def secrets(config_file: ConfigArg = "loko.yaml"):
         console.print(f"[bold red]Error fetching secrets: {e}[/bold red]")
         sys.exit(1)
 
+@app.command()
+def version():
+    """
+    Print the current version of loko.
+    """
+    try:
+        meta = metadata('loko-k8s')
+        ver = meta.get('Version')
+        console.print(ver)
+    except Exception:
+        console.print("version not found")
+        sys.exit(1)
+
 @app.command(name="check-prerequisites")
 def check_prerequisites():
     """
