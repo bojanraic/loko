@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 <div align="center">
-  <img src="loko-logo.svg" alt="LoKO Logo" width="200" height="200">
+  <img src="https://raw.githubusercontent.com/bojanraic/loko/main/loko-logo.svg" alt="LoKO Logo" width="200" height="200">
 </div>
 
 A Python CLI utility to manage local Kubernetes environments with Kind, providing simplified configuration management, version upgrades, DNS, wildcard certificates, local container registry, and extensive customization options.
