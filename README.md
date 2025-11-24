@@ -1,7 +1,7 @@
 # LoKO - Local Kubernetes Oasis - simplified Kubernetes development environments
 
-[![PyPI version](https://badge.fury.io/py/loko.svg)](https://badge.fury.io/py/loko)
-[![Python Versions](https://img.shields.io/pypi/pyversions/loko.svg)](https://pypi.org/project/loko/)
+[![PyPI version](https://badge.fury.io/py/loko-k8s.svg)](https://badge.fury.io/py/loko-k8s)
+[![Python Versions](https://img.shields.io/pypi/pyversions/loko-k8s.svg)](https://pypi.org/project/loko-k8s/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 <div align="center">
@@ -42,8 +42,14 @@ A Python CLI utility to manage local Kubernetes environments with Kind, providin
 
 ### From PyPI (recommended)
 
+Using pip:
 ```bash
-pip install loko
+pip install loko-k8s
+```
+
+Using uv:
+```bash
+uv tool install loko-k8s
 ```
 
 ### From Source
