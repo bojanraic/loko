@@ -1,6 +1,6 @@
 [project]
 name = "loko-k8s"
-version = "0.0.4"
+version = "0.0.5"
 description = "Local Kubernetes Environment Manager - Simplified local K8s development with Kind"
 authors = [
     {name = "Bojan Raic", email = "code+loko@bojan.io"},

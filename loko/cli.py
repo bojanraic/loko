@@ -43,6 +43,41 @@ app.add_typer(config_app)
 
 console = Console()
 
+def _check_docker_running(runtime: str = "docker") -> bool:
+    """Check if docker/container runtime daemon is actually running."""
+    try:
+        result = subprocess.run(
+            [runtime, "info"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+
+def _check_config_file(config_path: str) -> bool:
+    """Check if config file exists and is readable."""
+    return os.path.exists(config_path) and os.path.isfile(config_path)
+
+def _ensure_docker_running(runtime: str = "docker"):
+    """Ensure docker daemon is running, exit with error if not."""
+    if not _check_docker_running(runtime):
+        console.print(f"[bold red]❌ {runtime.capitalize()} daemon is not running.[/bold red]")
+        console.print(f"[yellow]Start it first, then try again.[/yellow]")
+        sys.exit(1)
+
+def _ensure_config_file(config_path: str):
+    """Ensure config file exists, exit with error if not."""
+    if not _check_config_file(config_path):
+        console.print(f"[bold red]❌ Configuration file '{config_path}' not found.[/bold red]")
+        console.print(f"[yellow]You can:[/yellow]")
+        console.print(f"[cyan]  1. Specify an existing config file:[/cyan]")
+        console.print(f"[cyan]     loko <command> --config <path>[/cyan]")
+        console.print(f"[cyan]  2. Generate a new config file:[/cyan]")
+        console.print(f"[cyan]     loko generate-config[/cyan]")
+        sys.exit(1)
+
 # Common config argument
 ConfigArg = Annotated[
     str, 
@@ -246,6 +281,9 @@ def init(
     """
     Initialize the local environment (generate configs, setup certs, network).
     """
+    _ensure_config_file(config_file)
+    _ensure_docker_running()
+
     console.print("[bold green]Initializing environment...[/bold green]")
     config = get_config(
         config_file, name, domain, workers, control_planes, runtime,
@@ -294,8 +332,11 @@ def create(
     """
     Create the full environment.
     """
+    _ensure_config_file(config_file)
+    _ensure_docker_running()
+
     console.print("[bold green]Creating environment...[/bold green]")
-    
+
     # Run init first
     init(
         config_file, templates_dir, name, domain, workers, control_planes, runtime,
@@ -335,6 +376,9 @@ def destroy(config_file: ConfigArg = "loko.yaml"):
     """
     Destroy the environment.
     """
+    _ensure_config_file(config_file)
+    _ensure_docker_running()
+
     console.print("[bold red]Destroying environment...[/bold red]")
     config = get_config(config_file)
     runner = CommandRunner(config)
@@ -383,8 +427,11 @@ def recreate(
     """
     Recreate the environment (destroy + create).
     """
+    _ensure_config_file(config_file)
+    _ensure_docker_running()
+
     console.print("[bold blue]Recreating environment...[/bold blue]\n")
-    
+
     # Destroy first
     destroy(config_file)
     
@@ -405,8 +452,11 @@ def clean(config_file: ConfigArg = "loko.yaml"):
     """
     Clean up the environment (destroy + remove artifacts).
     """
+    _ensure_config_file(config_file)
+    _ensure_docker_running()
+
     console.print("[bold red]Cleaning environment...[/bold red]\n")
-    
+
     config = get_config(config_file)
     
     # Destroy first
@@ -432,6 +482,9 @@ def start(config_file: ConfigArg = "loko.yaml"):
     """
     Start the environment.
     """
+    _ensure_config_file(config_file)
+    _ensure_docker_running()
+
     console.print("[bold green]Starting environment...[/bold green]")
     config = get_config(config_file)
     runner = CommandRunner(config)
@@ -478,6 +531,9 @@ def stop(config_file: ConfigArg = "loko.yaml"):
     """
     Stop the environment.
     """
+    _ensure_config_file(config_file)
+    _ensure_docker_running()
+
     console.print("[bold yellow]Stopping environment...[/bold yellow]")
     config = get_config(config_file)
     runner = CommandRunner(config)
@@ -523,6 +579,9 @@ def status(config_file: ConfigArg = "loko.yaml"):
     """
     Show environment status.
     """
+    _ensure_config_file(config_file)
+    _ensure_docker_running()
+
     console.print("[bold blue]Environment Status[/bold blue]\n")
     config = get_config(config_file)
     runner = CommandRunner(config)
@@ -664,6 +723,9 @@ def validate(config_file: ConfigArg = "loko.yaml"):
     """
     Validate the environment.
     """
+    _ensure_config_file(config_file)
+    _ensure_docker_running()
+
     console.print("[bold green]Validating environment...[/bold green]\n")
     config = get_config(config_file)
     runner = CommandRunner(config)
@@ -794,6 +856,9 @@ def secrets(config_file: ConfigArg = "loko.yaml"):
     """
     Fetch and save service credentials to a file.
     """
+    _ensure_config_file(config_file)
+    _ensure_docker_running()
+
     console.print("[bold blue]Fetching service credentials...[/bold blue]\n")
     config = get_config(config_file)
     runner = CommandRunner(config)
@@ -1341,11 +1406,9 @@ def config_upgrade(
     the appropriate datasources (Docker Hub, Helm repositories) to find the
     latest versions of components.
     """
-    console.print("[bold blue]Upgrading component versions...[/bold blue]\n")
+    _ensure_config_file(config_file)
 
-    if not os.path.exists(config_file):
-        console.print(f"[red]Error: Config file '{config_file}' not found[/red]")
-        sys.exit(1)
+    console.print("[bold blue]Upgrading component versions...[/bold blue]\n")
 
     try:
         from ruamel.yaml import YAML

@@ -91,6 +91,26 @@ uv run loko --help
    loko create
    ```
 
+## Demo
+
+Watch Loko in action - see the complete workflow from installation to cluster validation:
+
+[![asciicast](https://asciinema.org/a/OPbp4qi0eIIxYJXiA7vtokxge.svg)](https://asciinema.org/a/OPbp4qi0eIIxYJXiA7vtokxge)
+
+
+**Demo highlights:**
+
+- Installing loko
+- Generating a default configuration with auto-detected IP
+- Creating a local Kubernetes cluster with Kind
+- Deploying services (Traefik, container registry, PostgreSQL) with Helm
+- Validating the cluster setup
+- Checking environment status
+- Upgrading component versions
+- Viewing service secrets & connecting to PostgreSQL and test application
+- Stopping and starting environment
+- Installing shell completions
+
 ## Commands
 
 ### Environment Lifecycle

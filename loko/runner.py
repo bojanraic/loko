@@ -213,8 +213,41 @@ class CommandRunner:
         except subprocess.CalledProcessError as e:
             console.print(f"[bold red]Error running helmfile: {e}[/bold red]")
             raise
-        
+
         console.print("✅ Services deployed")
+
+        # Deploy TCP routes for system services
+        self.deploy_tcp_routes()
+
+    def deploy_tcp_routes(self):
+        """Deploy Traefik TCP routes for system services."""
+        tcp_routes_file = os.path.join(self.k8s_dir, "config", "traefik-tcp-routes.yaml")
+
+        if not os.path.exists(tcp_routes_file):
+            console.print("[yellow]⚠️  TCP routes file not found, skipping[/yellow]")
+            return
+
+        # Check if there's content to apply (file might be empty if no services have ports)
+        with open(tcp_routes_file, 'r') as f:
+            content = f.read().strip()
+
+        if not content:
+            console.print("ℹ️  No TCP routes to deploy")
+            return
+
+        console.print("🔄 Deploying Traefik TCP routes...")
+
+        try:
+            result = self.run_command([
+                "kubectl",
+                "--context", f"kind-{self.env.name}",
+                "apply", "-f", tcp_routes_file
+            ], capture_output=True)
+
+            console.print("✅ TCP routes deployed")
+
+        except subprocess.CalledProcessError as e:
+            console.print(f"[yellow]⚠️  Warning: Could not deploy TCP routes: {e.stderr}[/yellow]")
 
     def start_dnsmasq(self):
         """Start dnsmasq container."""
@@ -547,7 +580,7 @@ Domains=~{self.env.local_domain}
                 if result.returncode == 0:
                     console.print("✅ Control plane nodes can schedule workloads")
                 else:
-                    console.print("[yellow]⚠️  Control plane already configured or no taint found[/yellow]")
+                    console.print("ℹ️  Control plane already configured or no taint found")
             else:
                 console.print("ℹ️  Control plane scheduling disabled (default)")
                 
