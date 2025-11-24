@@ -91,6 +91,25 @@ uv run loko --help
    loko create
    ```
 
+## Demo
+
+Watch Loko in action - see the complete workflow from installation to cluster validation:
+
+<asciinema-player src="https://raw.githubusercontent.com/bojanraic/loko/main/docs/loko-demo.cast" cols="120" rows="40"></asciinema-player>
+
+<script src="https://cdn.jsdelivr.net/npm/asciinema-player@3/dist/bundle/asciinema-player.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/asciinema-player@3/dist/bundle/asciinema-player.css">
+
+**Demo highlights:**
+- Installing loko and checking prerequisites
+- Generating a default configuration with auto-detected IP
+- Creating a local Kubernetes cluster with Kind
+- Deploying services (PostgreSQL, MySQL, etc.) with Helm
+- Validating the cluster setup
+- Checking environment status
+- Upgrading component versions
+- Managing services and secrets
+
 ## Commands
 
 ### Environment Lifecycle
