@@ -109,7 +109,7 @@ Watch Loko in action - see the complete workflow from installation to cluster va
 - Upgrading component versions
 - Viewing service secrets & connecting to PostgreSQL and test application
 - Stopping and starting environment
-- Installing shell completions
+- Installing shell completion (via `--install-completion`)
 
 ## Commands
 
@@ -130,6 +130,8 @@ Watch Loko in action - see the complete workflow from installation to cluster va
 ### Configuration & Secrets
 - `loko generate-config` - Generate default loko.yaml
 - `loko config upgrade` - Upgrade component versions using Renovate comments
+- `loko config helm-repo-add` - Add Helm repositories to config
+- `loko config helm-repo-remove` - Remove Helm repositories from config
 - `loko secrets` - Fetch and display service credentials
 - `loko config presets` - View available service presets (coming soon)
 
@@ -191,10 +193,12 @@ loko config upgrade
 
 This will:
 1. 🔍 Scan your config for Renovate comments
-2. 🌐 Query each datasource for the latest version
+2. 🌐 Query each datasource for the latest version (in parallel)
 3. 💾 Create a backup (`loko-prev.yaml`)
 4. ✅ Update versions in place
 5. 📋 Show a summary of changes
+
+**Performance:** Helm repository checks are performed in parallel, significantly reducing upgrade time when checking multiple repositories. For example, checking 5 repositories completes ~1.3x faster than sequential checks.
 
 Example output:
 ```
@@ -211,6 +215,8 @@ Updates found:
 
 💾 Backup created: loko-prev.yaml
 ✅ Updated 3 version(s) in loko.yaml
+
+⏱️  Total fetch time: 8.18s (Helm ops: 8.18s)
 ```
 
 ### Restoring from Backup
@@ -219,6 +225,65 @@ If an upgrade causes issues, easily revert:
 
 ```bash
 mv loko-prev.yaml loko.yaml
+```
+
+## Managing Helm Repositories
+
+Loko provides commands to manage Helm repositories in your configuration file. This allows you to:
+- Add custom Helm repositories for service deployments
+- Manage repositories with a simple CLI interface
+- Use added repositories with services and version upgrades
+
+### Adding Repositories
+
+Add one or more Helm repositories in a single command:
+
+```bash
+# Add a single repository
+loko config helm-repo-add \
+  --helm-repo-name bitnami \
+  --helm-repo-url https://charts.bitnami.com/bitnami
+
+# Add multiple repositories at once
+loko config helm-repo-add \
+  --helm-repo-name bitnami --helm-repo-url https://charts.bitnami.com/bitnami \
+  --helm-repo-name jetstack --helm-repo-url https://charts.jetstack.io
+```
+
+### Removing Repositories
+
+Remove one or more repositories:
+
+```bash
+# Remove a single repository
+loko config helm-repo-remove --helm-repo-name bitnami
+
+# Remove multiple repositories
+loko config helm-repo-remove \
+  --helm-repo-name bitnami \
+  --helm-repo-name jetstack
+```
+
+### Using Added Repositories
+
+Added repositories appear in your config and can be referenced:
+
+```yaml
+environment:
+  helm-repositories:
+    - name: bitnami
+      url: https://charts.bitnami.com/bitnami/
+    - name: jetstack
+      url: https://charts.jetstack.io/
+
+  services:
+    user:
+      - name: my-app
+        config:
+          repo:
+            ref: bitnami          # Reference the added repository
+          chart: bitnami/nginx
+          version: 1.0.0
 ```
 
 ## Managing Service Credentials

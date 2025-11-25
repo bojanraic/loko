@@ -1,6 +1,6 @@
 [project]
 name = "loko-k8s"
-version = "0.0.5"
+version = "0.0.6"
 description = "Local Kubernetes Environment Manager - Simplified local K8s development with Kind"
 authors = [
     {name = "Bojan Raic", email = "code+loko@bojan.io"},
@@ -13,6 +13,7 @@ dependencies = [
     "jinja2>=3.1.0",
     "rich>=13.0.0",
     "shellingham>=1.5.0",
+    "packaging>=21.0",
 ]
 requires-python = ">=3.9"
 readme = "README.md"
@@ -31,6 +32,14 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Build Tools",
     "Topic :: System :: Systems Administration",
+]
+
+
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
 ]
 
 [project.urls]

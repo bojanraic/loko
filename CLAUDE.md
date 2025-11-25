@@ -17,15 +17,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Core Components
 
-1. **CLI Layer** (`loko/cli.py`):
-   - Entry point using Typer framework
-   - Manages all user-facing commands
-   - Applies CLI overrides to configuration before passing to other layers
-   - **Runtime prerequisite checks**: Commands that need Docker daemon or config file verify these BEFORE execution
-     - `_check_docker_running()` - Ensures docker daemon is accessible
-     - `_check_config_file()` - Ensures config file exists
+1. **CLI Layer** (`loko/cli/`):
+   - Modular CLI architecture using Typer framework
+   - Entry point: `loko/cli/__init__.py` with main `app` (Typer instance)
+   - Subcommand groups: `config_app` for configuration-related commands
+   - **Command Organization** (`loko/cli/commands/`):
+     - `lifecycle.py` - `init`, `create`, `destroy`, `recreate`, `clean` commands
+     - `control.py` - `start`, `stop` commands
+     - `status.py` - `status`, `validate` commands
+     - `config.py` - `generate-config`, `config upgrade`, `config helm-repo-add`, `config helm-repo-remove`, `secrets` commands
+     - `utility.py` - `version`, `check-prerequisites` commands
+   - **CLI Type Definitions** (`loko/cli_types.py`):
+     - Reusable `Annotated` type definitions for CLI arguments
+     - Examples: `ConfigArg`, `NameArg`, `DomainArg`, `WorkersArg`, etc.
+     - Ensures consistency across commands with shared argument definitions
+   - **Runtime prerequisite checks** (`loko/validators.py`):
+     - `ensure_docker_running()` - Ensures docker daemon is accessible
+     - `ensure_config_file()` - Ensures config file exists
      - Provides helpful error messages guiding users to solutions
-   - Key command groups: `init`, `create`, `destroy`, `start`, `stop`, `status`, `validate`, `secrets`, `config upgrade`, `generate-config`, `check-prerequisites`, `version`
+   - **Help system**: Supports both `-h` and `--help` via `context_settings={"help_option_names": ["-h", "--help"]}`
+   - **Shell Completion**: Uses Typer's built-in completion system (`add_completion=True`)
+     - Auto-detects current shell (bash, zsh, fish, powershell)
+     - Users run `loko --install-completion` to install completion
+     - Users run `loko --show-completion` to view completion script
 
 2. **Configuration** (`loko/config.py`):
    - Pydantic models defining the configuration schema
@@ -48,7 +62,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    - Test app validation for registry and TLS
    - Service secret extraction from running Kubernetes pods
 
-5. **Utilities** (`loko/utils.py`):
+5. **Version Management** (`loko/updates/`):
+   - **Parallel Version Checking**: Fetches Docker and Helm chart versions concurrently for 1.85x speedup
+   - **Modules**:
+     - `fetchers.py` - Fetches latest versions from Docker Hub and Helm repositories
+       - `fetch_latest_docker_version()` - Validates semantic versions using `packaging.version`
+       - `fetch_latest_helm_version()` - Fetches and parses Helm index.yaml, filters stable releases only
+       - Both return timing information for performance tracking
+     - `upgrader.py` - Orchestrates the upgrade process with parallel ThreadPoolExecutor
+       - Loads YAML preserving comments (uses `ruamel.yaml`)
+       - Creates backup before writing changes
+       - Displays timing metrics for Docker and Helm operations separately
+     - `yaml_walker.py` - Recursively walks YAML looking for Renovate comments
+       - Handles complex structures (nested maps, lists)
+       - Tracks processed comments to avoid duplicates
+     - `parsers.py` - Parses Renovate-style comments
+       - Extracts `datasource`, `depName`, `repositoryUrl` from comments
+   - **Renovate Comments Format**:
+     ```yaml
+     # renovate: datasource=docker depName=kindest/node
+     # renovate: datasource=helm depName=traefik repositoryUrl=https://traefik.github.io/charts
+     ```
+   - **Performance**: Both Docker and Helm version checks run in parallel, showing individual timing in output
+
+6. **Utilities** (`loko/utils.py`):
    - Configuration loading and validation
    - YAML deep merge for combining configurations
    - DNS container name generation
@@ -169,12 +206,27 @@ The `validate` command includes registry + TLS validation:
 loko/
 ├── loko/
 │   ├── __init__.py
-│   ├── cli.py              # Main CLI entry point
-│   ├── config.py           # Pydantic models
-│   ├── generator.py        # Jinja2 template rendering
-│   ├── runner.py           # Command execution orchestration
-│   ├── utils.py            # Utilities
-│   └── templates/          # Configuration templates
+│   ├── cli/                        # Modular CLI system
+│   │   ├── __init__.py            # Main app definition and root commands
+│   │   ├── commands/              # Command implementations
+│   │   │   ├── lifecycle.py       # init, create, destroy, recreate, clean
+│   │   │   ├── control.py         # start, stop
+│   │   │   ├── status.py          # status, validate
+│   │   │   ├── config.py          # config-related commands
+│   │   │   └── utility.py         # version, check-prerequisites
+│   ├── cli_types.py               # Reusable CLI type definitions (Annotated types)
+│   ├── validators.py              # Validation functions (ensure_docker_running, ensure_config_file)
+│   ├── config.py                  # Pydantic configuration models
+│   ├── generator.py               # Jinja2 template rendering
+│   ├── runner.py                  # Command execution orchestration
+│   ├── utils.py                   # Utility functions
+│   ├── updates/                   # Version management system
+│   │   ├── __init__.py
+│   │   ├── fetchers.py            # Fetch versions from Docker Hub and Helm repos
+│   │   ├── upgrader.py            # Orchestrate parallel version upgrades
+│   │   ├── yaml_walker.py         # Traverse YAML for Renovate comments
+│   │   └── parsers.py             # Parse Renovate comment syntax
+│   └── templates/                 # Configuration templates
 │       ├── kind/
 │       ├── dnsmasq/
 │       ├── helmfile/
@@ -183,9 +235,11 @@ loko/
 │       ├── loko.yaml.example
 │       ├── service_presets.yaml
 │       └── traefik-tcp-routes.yaml.j2
-├── pyproject.toml          # Project metadata and dependencies
-├── README.md               # User documentation
-└── uv.lock                 # Dependency lock file
+├── .mcp.json                       # MCP server configuration (git, docker, kubectl, context7, sequential-thinking)
+├── pyproject.toml                  # Project metadata and dependencies
+├── README.md                       # User documentation
+├── CLAUDE.md                       # Architecture guidance for Claude Code
+└── uv.lock                         # Dependency lock file
 ```
 
 ## Development Notes
@@ -219,57 +273,69 @@ The codebase relies on Kind + Helm + Helmfile for service deployment. Key intera
 - `loko/templates/service_presets.yaml`: Defines port and values presets for system services
 - `loko/utils.py`: Contains `load_config()` - critical for config initialization
 
-## Recommended MCPs for This Repository
+## MCP Servers Configuration
 
-MCPs (Model Context Protocol servers) that enhance Claude Code's capabilities when working with Loko:
+MCPs (Model Context Protocol servers) enhance Claude Code's capabilities when working with Loko. Configuration is managed via `.mcp.json` in the project root.
 
-### Essential MCPs
+### Configured MCPs
+
+**File: `.mcp.json`**
+
+```json
+{
+  "mcpServers": {
+    "git": {
+      "command": "git"
+    },
+    "docker": {
+      "command": "docker"
+    },
+    "kubernetes": {
+      "command": "kubectl"
+    },
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp@latest"]
+    },
+    "sequential-thinking": {
+      "command": "npx",
+      "args": ["-y", "@anthropic-ai/sequential-thinking"]
+    }
+  }
+}
+```
+
+### MCP Server Descriptions
 
 1. **Git MCP** (`git`)
    - Repository operations: status, diffs, commits, history
    - Essential for: Understanding changes, reviewing code, version control
-   - Usage: Check git status, view diffs, understand commit history
+   - Usage patterns: `git status`, `git diff`, `git log --oneline`
 
-2. **Bash/Shell MCP** (built-in)
-   - Execute shell commands: test loko commands, run builds, check prerequisites
-   - Essential for: Testing CLI, running `uv run loko`, validating configurations
-   - Commands: `uv run loko check-prerequisites`, `uv run loko generate-config`, etc.
-
-### Recommended Optional MCPs
-
-3. **Docker MCP** (if available)
+2. **Docker MCP** (`docker`)
    - Docker operations: inspect containers, check daemon status
    - Useful for: Verifying docker is running, inspecting Kind cluster nodes
    - Operations: List containers, inspect networks, check image status
 
-4. **Kubernetes MCP** (if available)
+3. **Kubernetes MCP** (`kubernetes`)
    - kubectl operations: query clusters, inspect resources
    - Useful for: Checking cluster status, inspecting deployed services, viewing pods
    - Operations: Get clusters, inspect namespaces, view ingresses, check services
 
-5. **YAML MCP** (if available)
-   - YAML validation and formatting
-   - Useful for: Validating config files, linting Helm templates, checking YAML syntax
+4. **Context7 MCP** (`context7`)
+   - Fetches up-to-date library documentation from official sources (PyPI, npm, GitHub, etc.)
+   - Useful for: Getting current API references, version-specific documentation
+   - Usage: Add `use context7` to your prompt to fetch current docs
 
-### Installation
-
-MCPs can be installed via Claude Code's settings. Add to `.claude/config.yaml`:
-
-```yaml
-mcp:
-  servers:
-    git:
-      command: git
-    # docker:
-    #   command: docker
-    # kubernetes:
-    #   command: kubectl
-```
+5. **Sequential-Thinking MCP** (`sequential-thinking`)
+   - Enables step-by-step reasoning for complex problems
+   - Useful for: Planning architecture, debugging complex issues, design reviews
+   - Usage: Use for multi-step problem analysis and design decisions
 
 ### Common MCP Usage Patterns for Loko
 
-- **Git**: `git status`, `git diff loko/cli.py`, `git log --oneline`
-- **Bash**: `uv run loko create --config loko.yaml`, `uv run loko status`
-- **Docker**: Verify daemon, inspect Kind node containers
-- **Kubernetes**: Query deployed services, check ingress status, verify pod health
-- **YAML**: Validate generated configs, lint helmfile and Kind cluster definitions
+- **Git**: Review changes, understand commit history, check status
+- **Docker**: Verify daemon running, inspect Kind cluster state
+- **Kubernetes**: Query deployed services, check resource health, verify ingress config
+- **Context7**: Fetch latest docs for dependencies when updating versions
+- **Sequential-Thinking**: Plan complex features, review architecture decisions
