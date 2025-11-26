@@ -1,6 +1,6 @@
 # LoKO - Local Kubernetes Oasis - simplified Kubernetes development environments
 
-[![PyPI version](https://badge.fury.io/py/loko-k8s.svg)](https://badge.fury.io/py/loko-k8s)
+[![PyPI version](https://img.shields.io/pypi/v/loko-k8s.svg)](https://badge.fury.io/py/loko-k8s)
 [![Python Versions](https://img.shields.io/pypi/pyversions/loko-k8s.svg)](https://pypi.org/project/loko-k8s/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
