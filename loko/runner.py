@@ -115,25 +115,45 @@ class CommandRunner:
         except Exception as e:
             console.print(f"[yellow]Warning: Could not check/create network: {e}[/yellow]")
 
+    def cluster_exists(self) -> bool:
+        """Check if Kind cluster exists."""
+        try:
+            result = self.run_command(["kind", "get", "clusters"], capture_output=True, check=False)
+            if result.returncode == 0:
+                clusters = result.stdout.strip().splitlines()
+                return self.env.name in clusters
+            return False
+        except Exception:
+            return False
+
     def create_cluster(self):
         """Create Kind cluster."""
         console.print(f"🔄 Creating cluster '{self.env.name}'...")
-        
+
         # Check if cluster exists
-        clusters = subprocess.check_output(["kind", "get", "clusters"], text=True).splitlines()
-        if self.env.name in clusters:
+        if self.cluster_exists():
             console.print(f"ℹ️ Cluster '{self.env.name}' already exists")
             return
 
         config_file = os.path.join(self.k8s_dir, "config", "cluster.yaml")
         cmd = ["kind", "create", "cluster", "--name", self.env.name, "--config", config_file]
-        
+
         try:
             subprocess.run(cmd, check=True, text=True, capture_output=False)
         except subprocess.CalledProcessError as e:
             console.print(f"[bold red]Error creating cluster: {e}[/bold red]")
             raise
         console.print(f"✅ Cluster '{self.env.name}' created")
+
+    def delete_cluster(self):
+        """Delete Kind cluster."""
+        if not self.cluster_exists():
+            console.print(f"ℹ️  Cluster '{self.env.name}' does not exist")
+            return
+
+        console.print(f"🔄 Deleting cluster '{self.env.name}'...")
+        self.run_command(["kind", "delete", "cluster", "--name", self.env.name])
+        console.print(f"✅ Cluster '{self.env.name}' deleted")
 
     def deploy_services(self):
         """Deploy services using helmfile."""
@@ -259,13 +279,21 @@ class CommandRunner:
             self.run_command([self.runtime, "rm", "-f", container_name], check=False, capture_output=True)
 
         config_path = os.path.join(self.k8s_dir, "config", "dnsmasq.conf")
+
+        # Use alternate DNS port in CI environments where port 53 may be in use
+        is_ci = os.getenv("CI") == "true" or os.getenv("GITHUB_ACTIONS") == "true"
+        dns_port = "5353" if is_ci else "53"
+
+        if is_ci:
+            console.print(f"[yellow]ℹ️  CI environment detected, using port {dns_port} for DNS[/yellow]")
+
         cmd = [
             self.runtime, "run", "-d",
             "--name", container_name,
             "--network", "kind",
             "--restart", "unless-stopped",
-            "-p", "53:53/udp",
-            "-p", "53:53/tcp",
+            "-p", f"{dns_port}:53/udp",
+            "-p", f"{dns_port}:53/tcp",
             "-v", f"{config_path}:/etc/dnsmasq.conf:ro",
             "dockurr/dnsmasq:2.91" # Hardcoded for now, should come from config
         ]
@@ -355,32 +383,31 @@ Domains=~{self.env.local_domain}
 
     def remove_resolver_file(self):
         """Remove /etc/resolver file for DNS resolution (macOS/Linux)."""
-        console.print(f"🔄 Removing DNS resolver for {self.env.local_domain}...")
-        
         import platform
         os_name = platform.system()
-        
+
         if os_name == "Darwin":  # macOS
             self._remove_resolver_file_mac()
         elif os_name == "Linux":
             self._remove_resolver_file_linux()
         else:
             console.print(f"[yellow]⚠️  Resolver file removal not implemented for {os_name}[/yellow]")
-    
+
     def _remove_resolver_file_mac(self):
         """Remove resolver file for macOS."""
         resolver_file = f"/etc/resolver/{self.env.local_domain}"
-        
+
         try:
             if os.path.exists(resolver_file):
+                console.print(f"🔄 Removing DNS resolver for {self.env.local_domain}...")
                 console.print(f"  🗑️  Removing {resolver_file}...")
                 self.run_command(['sudo', 'rm', '-f', resolver_file])
                 console.print(f"✅ Resolver file removed")
             else:
-                console.print(f"  ℹ️  Resolver file {resolver_file} does not exist")
+                console.print(f"ℹ️  DNS resolver file for {self.env.local_domain} does not exist")
         except Exception as e:
             console.print(f"[yellow]⚠️  Could not remove resolver file: {e}[/yellow]")
-    
+
     def _remove_resolver_file_linux(self):
         """Remove resolver file for Linux (systemd-resolved)."""
         try:
@@ -390,20 +417,21 @@ Domains=~{self.env.local_domain}
                 capture_output=True,
                 check=False
             )
-            
+
             if result.returncode == 0:
                 resolved_file = f"/etc/systemd/resolved.conf.d/{self.env.local_domain}.conf"
-                
+
                 if os.path.exists(resolved_file):
+                    console.print(f"🔄 Removing DNS resolver for {self.env.local_domain}...")
                     console.print(f"  🗑️  Removing {resolved_file}...")
                     self.run_command(['sudo', 'rm', '-f', resolved_file])
                     self.run_command(['sudo', 'systemctl', 'restart', 'systemd-resolved'])
                     console.print(f"✅ systemd-resolved configuration removed")
                 else:
-                    console.print(f"  ℹ️  Resolver config {resolved_file} does not exist")
+                    console.print(f"ℹ️  DNS resolver config for {self.env.local_domain} does not exist")
             else:
-                console.print("  ℹ️  systemd-resolved not enabled, skipping")
-                
+                console.print("ℹ️  systemd-resolved not enabled, skipping DNS resolver removal")
+
         except Exception as e:
             console.print(f"[yellow]⚠️  Could not remove Linux resolver: {e}[/yellow]")
 

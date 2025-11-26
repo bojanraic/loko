@@ -7,7 +7,7 @@ on:
     branches: [ main ]
 
 jobs:
-  test:
+  unit-tests:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -28,124 +28,116 @@ jobs:
     - name: Install loko
       run: |
         uv pip install --system -e .
-        uv pip install --system pytest pytest-cov
+        uv pip install --system pytest pytest-cov pytest-timeout
 
-    - name: Run Tests
+    - name: Run Unit Tests
       run: |
-        pytest --cov=loko --cov-report=term --cov-report=html --cov-report=xml tests/
+        pytest -m "not integration" --cov=loko --cov-report=term --cov-report=html --cov-report=xml tests/
 
-    - name: Upload Coverage Reports
-      if: always()
-      uses: actions/upload-artifact@v4
+    # - name: Upload Coverage Reports
+    #   if: always()
+    #   uses: actions/upload-artifact@v4
+    #   with:
+    #     name: coverage-reports-py${{ matrix.python-version }}
+    #     path: |
+    #       htmlcov/
+    #       coverage.xml
+    #       .coverage
+    #     retention-days: 7
+
+  integration-tests-fast:
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    # Only run on push events, skip on PRs
+    if: github.event_name == 'push'
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Install mise
+      uses: jdx/mise-action@v3
       with:
-        name: coverage-reports-py${{ matrix.python-version }}
-        path: |
-          htmlcov/
-          coverage.xml
-          .coverage
-        retention-days: 30
+        install: true
+        cache: true
 
-    - name: Install Kind
+    - name: Verify mise installation
       run: |
-        # Install Kind
-        curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64
-        chmod +x ./kind
-        sudo mv ./kind /usr/local/bin/kind
+        mise --version
+        mise list
+
+    - name: Install loko dependencies
+      run: |
+        mise run install
+
+    - name: Activate mise environment
+      run: |
+        eval "$(mise activate bash)"
+        echo "$PATH" >> $GITHUB_PATH
+
+    - name: Verify prerequisites
+      run: |
+        echo "=== Python ==="
+        python --version
+        echo ""
+        echo "=== Kind ==="
         kind version
-
-    - name: Install mkcert
-      run: |
-        # Install mkcert
-        curl -Lo mkcert https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-linux-amd64
-        chmod +x mkcert
-        sudo mv mkcert /usr/local/bin/mkcert
-        mkcert -version
-
-    - name: Install Helm
-      run: |
-        # Install Helm
-        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+        echo ""
+        echo "=== kubectl ==="
+        kubectl version --client
+        echo ""
+        echo "=== Helm ==="
         helm version
-
-    - name: Install Helmfile
-      run: |
-        # Install Helmfile
-        curl -Lo helmfile.tar.gz https://github.com/helmfile/helmfile/releases/download/v0.169.2/helmfile_0.169.2_linux_amd64.tar.gz
-        tar -xzf helmfile.tar.gz
-        chmod +x helmfile
-        sudo mv helmfile /usr/local/bin/helmfile
+        echo ""
+        echo "=== Helmfile ==="
         helmfile version
-
-    - name: Verify Docker
-      run: |
-        # Docker is pre-installed on GitHub Actions runners
+        echo ""
+        echo "=== mkcert ==="
+        mkcert -version
+        echo ""
+        echo "=== Docker ==="
         docker --version
         docker info
-
-    - name: Verify kubectl
-      run: |
-        # kubectl is pre-installed on GitHub Actions runners
-        kubectl version --client
-
-    - name: Test CLI help commands
-      run: |
-        loko --help
-        loko init --help
-        loko config --help
-        loko create --help
-        loko destroy --help
-        loko check-prerequisites --help
-
-    - name: Run check-prerequisites
-      run: |
-        # Run the prerequisites check - should pass with all tools installed
+        echo ""
+        echo "=== loko ==="
+        loko --version
+        echo ""
+        echo "=== Loko check-prerequisites ==="
         loko check-prerequisites
 
-    - name: Test config generation
+    - name: Run Fast Integration Tests
       run: |
-        # Test generating a config file
-        loko generate-config --output test-config.yaml --force
-        test -f test-config.yaml
-        echo "✅ Config file generated successfully"
+        mise exec -- pytest -m 'integration and not full_cluster' -v -s
 
-    - name: Configure for CI environment
+  integration-tests-full:
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    # Only run on main branch or tags
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Install mise
+      uses: jdx/mise-action@v3
+      with:
+        install: true
+        cache: true
+
+    - name: Install loko dependencies
       run: |
-        # Get the runner's IP address
-        RUNNER_IP=$(hostname -I | awk '{print $1}')
-        echo "Runner IP: $RUNNER_IP"
+        mise run install
 
-        # Update the config with the runner's IP
-        sed -i "s/local-ip: .*/local-ip: $RUNNER_IP/" test-config.yaml
-
-        echo "Updated config:"
-        grep "local-ip:" test-config.yaml
-
-    - name: Test init (generate cluster configs)
+    - name: Activate mise environment
       run: |
-        # Test that init generates Kind cluster config, helmfile, etc.
-        # Note: This doesn't create the cluster, just generates configs
-        loko init --config test-config.yaml
-        echo "✅ Init completed successfully"
+        eval "$(mise activate bash)"
+        echo "$PATH" >> $GITHUB_PATH
 
-        # Verify generated files exist
-        ls -la .loko/dev-me/config/
-        files=(
-          ".loko/dev-me/config/cluster.yaml"
-          ".loko/dev-me/config/helmfile.yaml"
-          ".loko/dev-me/config/dnsmasq.conf"
-        )
+    - name: Run Full Integration Tests
+      run: |
+        mise exec -- pytest -m 'integration and full_cluster' -v --tb=short -s
+      timeout-minutes: 30
 
-        for file in "${files[@]}"; do
-          if [ -f "$file" ]; then
-            echo "=== $file ==="
-            cat "$file"
-            echo ""
-            echo ""
-          else
-            echo "=== $file ==="
-            echo "File not found"
-            echo ""
-            echo ""
-          fi
-        done
-        echo "✅ All config files generated correctly"
+    - name: Cleanup Test Clusters
+      if: always()
+      run: |
+        kind get clusters | xargs -r -n1 kind delete cluster --name || true

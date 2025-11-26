@@ -18,46 +18,77 @@ def start(config_file: ConfigArg = "loko.yaml") -> None:
     ensure_config_file(config_file)
     ensure_docker_running()
 
-    console.print("[bold green]Starting environment...[/bold green]")
     config = get_config(config_file)
-    runner = CommandRunner(config)
-
     cluster_name = config.environment.name
     runtime = config.environment.provider.runtime
+    runner = CommandRunner(config)
 
-    # Get all cluster-related containers
-    try:
-        containers = runner.list_containers(name_filter=cluster_name, all_containers=True, format_expr="{{.Names}}")
-
-        if not containers:
-            console.print(f"[yellow]No containers found for cluster '{cluster_name}'[/yellow]")
-            console.print("Run 'loko create' first to create the environment")
-            sys.exit(1)
-
-        # Check if all are already running
-        all_running = True
-        for container in containers:
-            running = runner.list_containers(name_filter=container, status_filter="running", quiet=True, check=False)
-            if not running:
-                all_running = False
-                break
-
-        if all_running:
-            console.print(f"[green]✅ Cluster '{cluster_name}' is already running[/green]")
-            return
-
-        # Start containers
-        console.print(f"[blue]Starting all '{cluster_name}'-related containers...[/blue]")
-        for container in containers:
-            console.print(f"  ⏳ Starting {container}...")
-            runner.run_command([runtime, "start", container])
-            console.print(f"  ✅ Started {container}")
-
-        console.print(f"[bold green]✅ Started cluster '{cluster_name}'[/bold green]")
-
-    except Exception as e:
-        console.print(f"[bold red]Error starting environment: {e}[/bold red]")
+    # Check if cluster exists first
+    if not runner.cluster_exists():
+        console.print(f"[yellow]⚠️  Cluster '{cluster_name}' does not exist[/yellow]")
+        console.print("Run [bold]loko create[/bold] first to create the environment")
         sys.exit(1)
+
+    # Check what needs to be started
+    containers = runner.list_containers(name_filter=cluster_name, all_containers=True, format_expr="{{.Names}}")
+    if not containers:
+        console.print(f"[yellow]⚠️  No containers found for cluster '{cluster_name}'[/yellow]")
+        console.print("Run [bold]loko create[/bold] first to create the environment")
+        sys.exit(1)
+
+    cluster_stopped = False
+    for container in containers:
+        if not runner.list_containers(name_filter=container, status_filter="running", quiet=True, check=False):
+            cluster_stopped = True
+            break
+
+    from loko.utils import get_dns_container_name
+    dns_container = get_dns_container_name(cluster_name)
+    dns_exists = bool(runner.list_containers(name_filter=dns_container, all_containers=True, quiet=True, check=False))
+    dns_stopped = False
+    if dns_exists:
+        dns_stopped = not bool(runner.list_containers(name_filter=dns_container, status_filter="running", quiet=True, check=False))
+
+    # If everything is already running
+    if not cluster_stopped and not dns_stopped:
+        console.print(f"[green]ℹ️  Environment '{cluster_name}' is already running[/green]")
+        return
+
+    # Something needs starting
+    console.print(f"[bold green]Starting environment '{cluster_name}'...[/bold green]")
+
+    # Start cluster containers if needed
+    if cluster_stopped:
+        try:
+            console.print(f"[blue]Starting cluster containers...[/blue]")
+            for container in containers:
+                running = runner.list_containers(name_filter=container, status_filter="running", quiet=True, check=False)
+                if not running:
+                    console.print(f"  ⏳ Starting {container}...")
+                    runner.run_command([runtime, "start", container])
+                    console.print(f"  ✅ Started {container}")
+        except Exception as e:
+            console.print(f"[bold red]Error starting cluster containers: {e}[/bold red]")
+            sys.exit(1)
+    else:
+        console.print(f"[green]ℹ️  Cluster containers are already running[/green]")
+
+    # Start DNS container if it exists and is stopped
+    if dns_exists and dns_stopped:
+        try:
+            console.print(f"[blue]Starting DNS service...[/blue]")
+            console.print(f"  ⏳ Starting {dns_container}...")
+            runner.run_command([runtime, "start", dns_container])
+            console.print(f"  ✅ Started {dns_container}")
+        except Exception as e:
+            console.print(f"[yellow]⚠️  Could not start DNS container: {e}[/yellow]")
+    elif dns_exists:
+        console.print(f"[green]ℹ️  DNS container '{dns_container}' is already running[/green]")
+    else:
+        console.print(f"[yellow]ℹ️  DNS container '{dns_container}' does not exist[/yellow]")
+        console.print(f"[dim]Tip: Run [bold]loko create[/bold] to recreate the full environment[/dim]")
+
+    console.print(f"[bold green]✅ Environment '{cluster_name}' started[/bold green]")
 
 
 def stop(config_file: ConfigArg = "loko.yaml") -> None:
@@ -67,42 +98,67 @@ def stop(config_file: ConfigArg = "loko.yaml") -> None:
     ensure_config_file(config_file)
     ensure_docker_running()
 
-    console.print("[bold yellow]Stopping environment...[/bold yellow]")
     config = get_config(config_file)
-    runner = CommandRunner(config)
-
     cluster_name = config.environment.name
     runtime = config.environment.provider.runtime
+    runner = CommandRunner(config)
 
-    # Get all cluster-related containers
-    try:
+    # Check what needs to be stopped before announcing
+    cluster_exists = runner.cluster_exists()
+    cluster_running = False
+    dns_running = False
+
+    if cluster_exists:
         containers = runner.list_containers(name_filter=cluster_name, all_containers=True, format_expr="{{.Names}}")
-
-        if not containers:
-            console.print(f"[yellow]No containers found for cluster '{cluster_name}'[/yellow]")
-            return
-
-        # Check if all are already stopped
-        all_stopped = True
         for container in containers:
-            running = runner.list_containers(name_filter=container, status_filter="running", quiet=True, check=False)
-            if running:
-                all_stopped = False
+            if runner.list_containers(name_filter=container, status_filter="running", quiet=True, check=False):
+                cluster_running = True
                 break
 
-        if all_stopped:
-            console.print(f"[green]ℹ️  Cluster '{cluster_name}' is already stopped[/green]")
-            return
+    from loko.utils import get_dns_container_name
+    dns_container = get_dns_container_name(cluster_name)
+    dns_running = bool(runner.list_containers(name_filter=dns_container, status_filter="running", quiet=True, check=False))
 
-        # Stop containers
-        console.print(f"[blue]Stopping all '{cluster_name}'-related containers...[/blue]")
-        for container in containers:
-            console.print(f"  ⏳ Stopping {container}...")
-            runner.run_command([runtime, "stop", container])
-            console.print(f"  ✅ Stopped {container}")
+    # If nothing is running, report and exit early
+    if not cluster_running and not dns_running:
+        console.print(f"[green]ℹ️  Environment '{cluster_name}' is already stopped[/green]")
+        return
 
-        console.print(f"[bold yellow]✅ Stopped cluster '{cluster_name}'[/bold yellow]")
+    # Something needs stopping
+    console.print(f"[bold yellow]Stopping environment '{cluster_name}'...[/bold yellow]")
 
-    except Exception as e:
-        console.print(f"[bold red]Error stopping environment: {e}[/bold red]")
-        sys.exit(1)
+    # Stop cluster containers if running
+    if cluster_running:
+        try:
+            containers = runner.list_containers(name_filter=cluster_name, all_containers=True, format_expr="{{.Names}}")
+            console.print(f"[blue]Stopping cluster containers...[/blue]")
+            for container in containers:
+                running = runner.list_containers(name_filter=container, status_filter="running", quiet=True, check=False)
+                if running:
+                    console.print(f"  ⏳ Stopping {container}...")
+                    runner.run_command([runtime, "stop", container])
+                    console.print(f"  ✅ Stopped {container}")
+        except Exception as e:
+            console.print(f"[bold red]Error stopping cluster containers: {e}[/bold red]")
+    elif not cluster_exists:
+        console.print(f"[yellow]ℹ️  Cluster '{cluster_name}' does not exist[/yellow]")
+    else:
+        console.print(f"[green]ℹ️  Cluster containers are already stopped[/green]")
+
+    # Stop DNS container if running
+    if dns_running:
+        try:
+            console.print(f"[blue]Stopping DNS service...[/blue]")
+            console.print(f"  ⏳ Stopping {dns_container}...")
+            runner.run_command([runtime, "stop", dns_container])
+            console.print(f"  ✅ Stopped {dns_container}")
+        except Exception as e:
+            console.print(f"[yellow]⚠️  Could not stop DNS container: {e}[/yellow]")
+    else:
+        dns_exists = bool(runner.list_containers(name_filter=dns_container, all_containers=True, quiet=True, check=False))
+        if dns_exists:
+            console.print(f"[green]ℹ️  DNS container '{dns_container}' is already stopped[/green]")
+        else:
+            console.print(f"[yellow]ℹ️  DNS container '{dns_container}' does not exist[/yellow]")
+
+    console.print(f"[bold green]✅ Environment '{cluster_name}' stopped[/bold green]")
