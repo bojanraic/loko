@@ -280,7 +280,6 @@ def init(
     ensure_config_file(config_file)
     ensure_docker_running()
 
-    console.print("[bold green]Initializing environment...[/bold green]")
     config = get_config(
         config_file, name, domain, workers, control_planes, runtime,
         local_ip, k8s_version, lb_ports, apps_subdomain, service_presets,
@@ -288,6 +287,8 @@ def init(
         base_dir, expand_vars, k8s_api_port, schedule_on_control,
         internal_on_control, registry_name, registry_storage, services_on_workers
     )
+
+    console.print(f"[bold green]Initializing environment '{config.environment.name}'...[/bold green]")
 
     # Check that base directory is writable before proceeding
     ensure_base_dir_writable(config.environment.base_dir)
@@ -334,7 +335,16 @@ def create(
     ensure_config_file(config_file)
     ensure_docker_running()
 
-    console.print("[bold green]Creating environment...[/bold green]")
+    # Load config first to get environment name
+    config = get_config(
+        config_file, name, domain, workers, control_planes, runtime,
+        local_ip, k8s_version, lb_ports, apps_subdomain, service_presets,
+        metrics_server, enable_service, disable_service,
+        base_dir, expand_vars, k8s_api_port, schedule_on_control,
+        internal_on_control, registry_name, registry_storage, services_on_workers
+    )
+
+    console.print(f"[bold green]Creating environment '{config.environment.name}'...[/bold green]")
 
     # Run init first
     init(
@@ -375,19 +385,25 @@ def destroy(config_file: str = "loko.yaml") -> None:
     ensure_config_file(config_file)
     ensure_docker_running()
 
-    console.print("[bold red]Destroying environment...[/bold red]")
     config = get_config(config_file)
+    console.print(f"[bold red]Destroying environment '{config.environment.name}'...[/bold red]")
     runner = CommandRunner(config)
 
     cluster_name = config.environment.name
     runtime = config.environment.provider.runtime
 
     # Delete cluster
-    runner.run_command(["kind", "delete", "cluster", "--name", cluster_name])
+    runner.delete_cluster()
 
     # Remove DNS container
     dns_container = get_dns_container_name(cluster_name)
-    runner.run_command([runtime, "rm", "-f", dns_container], check=False)
+    dns_containers = runner.list_containers(name_filter=dns_container, all_containers=True, quiet=True, check=False)
+    if dns_containers:
+        console.print(f"🔄 Removing DNS container '{dns_container}'...")
+        runner.run_command([runtime, "rm", "-f", dns_container], check=False)
+        console.print(f"✅ DNS container removed")
+    else:
+        console.print(f"ℹ️  DNS container '{dns_container}' does not exist")
 
     # Remove resolver file
     runner.remove_resolver_file()
@@ -426,7 +442,16 @@ def recreate(
     ensure_config_file(config_file)
     ensure_docker_running()
 
-    console.print("[bold blue]Recreating environment...[/bold blue]\n")
+    # Load config to get environment name
+    config = get_config(
+        config_file, name, domain, workers, control_planes, runtime,
+        local_ip, k8s_version, lb_ports, apps_subdomain, service_presets,
+        metrics_server, enable_service, disable_service,
+        base_dir, expand_vars, k8s_api_port, schedule_on_control,
+        internal_on_control, registry_name, registry_storage, services_on_workers
+    )
+
+    console.print(f"[bold blue]Recreating environment '{config.environment.name}'...[/bold blue]\n")
 
     # Destroy first
     destroy(config_file)
@@ -450,9 +475,9 @@ def clean(config_file: str = "loko.yaml") -> None:
     ensure_config_file(config_file)
     ensure_docker_running()
 
-    console.print("[bold red]Cleaning environment...[/bold red]\n")
-
     config = get_config(config_file)
+
+    console.print(f"[bold red]Cleaning environment '{config.environment.name}'...[/bold red]\n")
 
     # Destroy first
     destroy(config_file)

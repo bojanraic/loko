@@ -92,23 +92,65 @@ def test_ensure_network_create(mock_run, sample_config):
     assert mock_run.call_count == 2
     assert "create" in mock_run.call_args_list[1][0][0]
 
-@patch("subprocess.check_output")
 @patch("subprocess.run")
-def test_create_cluster_exists(mock_run, mock_check_output, sample_config):
+def test_cluster_exists_true(mock_run, sample_config):
     runner = CommandRunner(sample_config)
-    mock_check_output.return_value = "test-env\nother-cluster"
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = "test-env\nother-cluster\n"
+    mock_run.return_value = mock_result
+    assert runner.cluster_exists() is True
+
+@patch("subprocess.run")
+def test_cluster_exists_false(mock_run, sample_config):
+    runner = CommandRunner(sample_config)
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = "other-cluster\n"
+    mock_run.return_value = mock_result
+    assert runner.cluster_exists() is False
+
+@patch("subprocess.run")
+def test_cluster_exists_error(mock_run, sample_config):
+    runner = CommandRunner(sample_config)
+    mock_run.side_effect = Exception("Command failed")
+    assert runner.cluster_exists() is False
+
+@patch.object(CommandRunner, 'cluster_exists')
+@patch("subprocess.run")
+def test_create_cluster_exists(mock_run, mock_cluster_exists, sample_config):
+    runner = CommandRunner(sample_config)
+    mock_cluster_exists.return_value = True
     runner.create_cluster()
     mock_run.assert_not_called()
 
-@patch("subprocess.check_output")
+@patch.object(CommandRunner, 'cluster_exists')
 @patch("subprocess.run")
-def test_create_cluster_new(mock_run, mock_check_output, sample_config):
+def test_create_cluster_new(mock_run, mock_cluster_exists, sample_config):
     runner = CommandRunner(sample_config)
-    mock_check_output.return_value = "other-cluster"
+    mock_cluster_exists.return_value = False
     runner.create_cluster()
     mock_run.assert_called_once()
     assert "create" in mock_run.call_args[0][0]
     assert "cluster" in mock_run.call_args[0][0]
+
+@patch.object(CommandRunner, 'cluster_exists')
+@patch.object(CommandRunner, 'run_command')
+def test_delete_cluster_exists(mock_run_command, mock_cluster_exists, sample_config):
+    runner = CommandRunner(sample_config)
+    mock_cluster_exists.return_value = True
+    runner.delete_cluster()
+    mock_run_command.assert_called_once()
+    assert "delete" in mock_run_command.call_args[0][0]
+    assert "cluster" in mock_run_command.call_args[0][0]
+
+@patch.object(CommandRunner, 'cluster_exists')
+@patch.object(CommandRunner, 'run_command')
+def test_delete_cluster_not_exists(mock_run_command, mock_cluster_exists, sample_config):
+    runner = CommandRunner(sample_config)
+    mock_cluster_exists.return_value = False
+    runner.delete_cluster()
+    mock_run_command.assert_not_called()
 
 
 def test_runner_initialization(sample_config):

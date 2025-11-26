@@ -1,0 +1,52 @@
+# Mise configuration for Loko development environment
+# https://mise.jdx.dev/
+
+[env]
+_.python.venv = { path = "{{config_root}}/.venv", create = true }
+
+[tools]
+# Language and package management
+python = "3.12"
+uv = "latest"
+
+# Kubernetes infrastructure
+kind = "0.30.0"
+kubectl = "1.34.2"
+helm = "4.0.1"
+helmfile = "1.2.1"
+
+# Certificate generation
+mkcert = "1.4.4"
+
+# YAML/JSON utilities (optional but useful)
+yq = "4.49.2"
+jq = "1.8.1"
+
+[tasks.install]
+description = "Install loko in development mode"
+run = """
+#!/bin/bash
+set -euo pipefail
+uv pip install -e .
+uv pip install pytest pytest-cov pytest-timeout
+"""
+
+[tasks.test-unit]
+description = "Run unit tests with coverage"
+run = "pytest -m 'not integration' --cov=loko --cov-report=term-missing"
+
+[tasks.test-integration-fast]
+description = "Run fast integration tests"
+run = "pytest -m 'integration and not full_cluster' -v"
+
+[tasks.test-integration-full]
+description = "Run full integration tests including cluster creation"
+run = "pytest -m 'integration and full_cluster' -v --tb=short"
+
+[tasks.test-all]
+description = "Run all tests"
+run = "pytest -v"
+
+[tasks.check]
+description = "Check prerequisites for loko"
+run = "loko check-prerequisites"

@@ -55,3 +55,6 @@ htmlcov/
 .tox/
 .hypothesis/
 *.log
+
+# Mise
+.mise.local.toml
