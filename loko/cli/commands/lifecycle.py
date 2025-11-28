@@ -7,10 +7,10 @@ from typing import Optional, List
 from rich.console import Console
 
 from loko.config import RootConfig
-from loko.utils import load_config, get_dns_container_name
+from loko.utils import load_config, get_dns_container_name, print_environment_summary
 from loko.generator import ConfigGenerator
 from loko.runner import CommandRunner
-from loko.validators import ensure_config_file, ensure_docker_running, ensure_base_dir_writable
+from loko.validators import ensure_config_file, ensure_docker_running, ensure_base_dir_writable, ensure_single_server_cluster
 
 
 console = Console()
@@ -288,6 +288,9 @@ def init(
         internal_on_control, registry_name, registry_storage, services_on_workers
     )
 
+    # Validate cluster configuration
+    ensure_single_server_cluster(config.environment.nodes.servers)
+
     console.print(f"[bold green]Initializing environment '{config.environment.name}'...[/bold green]")
 
     # Check that base directory is writable before proceeding
@@ -344,6 +347,9 @@ def create(
         internal_on_control, registry_name, registry_storage, services_on_workers
     )
 
+    # Validate cluster configuration
+    ensure_single_server_cluster(config.environment.nodes.servers)
+
     console.print(f"[bold green]Creating environment '{config.environment.name}'...[/bold green]")
 
     # Run init first
@@ -376,6 +382,9 @@ def create(
     runner.setup_wildcard_cert()
     runner.deploy_services()
     runner.fetch_service_secrets()
+
+    # Print environment summary
+    print_environment_summary(config)
 
 
 def destroy(config_file: str = "loko.yaml") -> None:
@@ -450,6 +459,9 @@ def recreate(
         base_dir, expand_vars, k8s_api_port, schedule_on_control,
         internal_on_control, registry_name, registry_storage, services_on_workers
     )
+
+    # Validate cluster configuration
+    ensure_single_server_cluster(config.environment.nodes.servers)
 
     console.print(f"[bold blue]Recreating environment '{config.environment.name}'...[/bold blue]\n")
 

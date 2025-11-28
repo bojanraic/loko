@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import List, Optional
 from rich.console import Console
 from .config import RootConfig
-from .utils import get_dns_container_name
+from .utils import get_dns_container_name, is_port_in_use
 
 console = Console()
 
@@ -287,6 +287,10 @@ class CommandRunner:
         if is_ci:
             console.print(f"[yellow]ℹ️  CI environment detected, using port {dns_port} for DNS[/yellow]")
 
+        # Check if port is available
+        if is_port_in_use(int(dns_port)):
+            raise RuntimeError(f"Port {dns_port} is already in use. Please stop the service using it (e.g. systemd-resolved) or check for other running containers.")
+
         cmd = [
             self.runtime, "run", "-d",
             "--name", container_name,
@@ -295,10 +299,19 @@ class CommandRunner:
             "-p", f"{dns_port}:53/udp",
             "-p", f"{dns_port}:53/tcp",
             "-v", f"{config_path}:/etc/dnsmasq.conf:ro",
-            "dockurr/dnsmasq:2.91" # Hardcoded for now, should come from config
+            f"dockurr/dnsmasq:{self._get_dnsmasq_version()}"
         ]
         self.run_command(cmd)
         console.print("✅ DNS service started")
+
+    def _get_dnsmasq_version(self) -> str:
+        """Get dnsmasq version from config."""
+        # renovate: datasource=docker depName=dockurr/dnsmasq
+        default_version = "2.91"
+        for component in self.env.internal_components:
+            if "dnsmasq" in component:
+                return component["dnsmasq"]
+        return default_version
 
     def setup_resolver_file(self):
         """Setup /etc/resolver file for DNS resolution (macOS/Linux)."""

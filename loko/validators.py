@@ -12,17 +12,21 @@ Ensure functions (exit on failure with helpful error messages):
 - ensure_docker_running(runtime) - Exit if Docker/container runtime not running
 - ensure_config_file(config_path) - Exit if config file missing, suggest solutions
 - ensure_base_dir_writable(base_dir) - Exit if base dir not writable, suggest fixes
+- ensure_single_server_cluster(servers) - Exit if multi-server cluster configured (not yet supported)
 
 Used by CLI commands in loko/cli/commands/:
 - ensure_config_file() before commands that read config
 - ensure_docker_running() before commands that use Docker (create, start, stop, etc.)
 - ensure_base_dir_writable() before commands that write to base directory
+- ensure_single_server_cluster() before commands that create/modify clusters
 
 Example usage:
     @app.command()
     def create(config: ConfigArg = "loko.yaml"):
         ensure_config_file(config)
         ensure_docker_running()
+        config = get_config(config)
+        ensure_single_server_cluster(config.environment.nodes.servers)
         # ... rest of implementation
 """
 import os
@@ -98,4 +102,15 @@ def ensure_base_dir_writable(base_dir: str):
         console.print(f"[cyan]  • The filesystem is not read-only[/cyan]")
         console.print(f"\n[yellow]You can override the base directory with:[/yellow]")
         console.print(f"[cyan]  loko <command> --base-dir /path/to/writable/directory[/cyan]")
+        sys.exit(1)
+
+
+def ensure_single_server_cluster(servers: int):
+    """Ensure cluster has only 1 control plane server (multi-server not yet supported)."""
+    if servers > 1:
+        console.print(f"[bold red]❌ Multi-control-plane clusters are not supported yet.[/bold red]")
+        console.print(f"[yellow]You specified {servers} control plane servers, but only 1 is currently supported.[/yellow]")
+        console.print(f"\n[yellow]Please update your configuration:[/yellow]")
+        console.print(f"[cyan]  nodes:[/cyan]")
+        console.print(f"[cyan]    servers: 1[/cyan]")
         sys.exit(1)

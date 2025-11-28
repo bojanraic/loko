@@ -40,14 +40,16 @@
                 "/^loko/templates/.*\\.yaml$/",
                 "/^loko/templates/.*\\.example$/",
                 "/^loko\\.yaml$/",
-                "/^loko-.*\\.yaml$/"
+                "/^loko-.*\\.yaml$/",
+                "/^loko/runner\\.py$/"
             ],
             "matchStrings": [
                 "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+) repositoryUrl=(?<registryUrl>\\S+)\\s+- [^:]+:\\s+\"(?<currentValue>[^\"]+)\"",
                 "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+) repositoryUrl=(?<registryUrl>\\S+)\\s+version:\\s+(?<currentValue>\\S+)",
                 "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+- [^:]+:\\s+\"(?<currentValue>[^\"]+)\"",
                 "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+version:\\s+(?<currentValue>\\S+)",
-                "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+tag:\\s+(?<currentValue>\\S+)"
+                "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+tag:\\s+(?<currentValue>\\S+)",
+                "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: repositoryUrl=(?<registryUrl>\\S+))?\\s+[^=]+=\\s+\"(?<currentValue>[^\"]+)\""
             ]
         }
     ]

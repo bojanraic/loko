@@ -5,6 +5,7 @@ from rich.console import Console
 from loko.validators import ensure_config_file, ensure_docker_running
 from loko.runner import CommandRunner
 from loko.cli_types import ConfigArg
+from loko.utils import print_environment_summary
 from .lifecycle import get_config
 
 
@@ -38,16 +39,19 @@ def start(config_file: ConfigArg = "loko.yaml") -> None:
 
     cluster_stopped = False
     for container in containers:
-        if not runner.list_containers(name_filter=container, status_filter="running", quiet=True, check=False):
+        running_containers = runner.list_containers(name_filter=container, status_filter="running", format_expr="{{.Names}}", check=False)
+        if container not in running_containers:
             cluster_stopped = True
             break
 
     from loko.utils import get_dns_container_name
     dns_container = get_dns_container_name(cluster_name)
-    dns_exists = bool(runner.list_containers(name_filter=dns_container, all_containers=True, quiet=True, check=False))
+    existing_containers = runner.list_containers(name_filter=dns_container, all_containers=True, format_expr="{{.Names}}", check=False)
+    dns_exists = dns_container in existing_containers
     dns_stopped = False
     if dns_exists:
-        dns_stopped = not bool(runner.list_containers(name_filter=dns_container, status_filter="running", quiet=True, check=False))
+        running_containers = runner.list_containers(name_filter=dns_container, status_filter="running", format_expr="{{.Names}}", check=False)
+        dns_stopped = dns_container not in running_containers
 
     # If everything is already running
     if not cluster_stopped and not dns_stopped:
@@ -62,8 +66,8 @@ def start(config_file: ConfigArg = "loko.yaml") -> None:
         try:
             console.print(f"[blue]Starting cluster containers...[/blue]")
             for container in containers:
-                running = runner.list_containers(name_filter=container, status_filter="running", quiet=True, check=False)
-                if not running:
+                running_containers = runner.list_containers(name_filter=container, status_filter="running", format_expr="{{.Names}}", check=False)
+                if container not in running_containers:
                     console.print(f"  ⏳ Starting {container}...")
                     runner.run_command([runtime, "start", container])
                     console.print(f"  ✅ Started {container}")
@@ -82,13 +86,34 @@ def start(config_file: ConfigArg = "loko.yaml") -> None:
             console.print(f"  ✅ Started {dns_container}")
         except Exception as e:
             console.print(f"[yellow]⚠️  Could not start DNS container: {e}[/yellow]")
+            # Verify DNS container started
+            running_containers = runner.list_containers(name_filter=dns_container, status_filter="running", format_expr="{{.Names}}", check=False)
+            dns_running = dns_container in running_containers
+            if not dns_running:
+                console.print(f"[yellow]⚠️  DNS container '{dns_container}' failed to start[/yellow]")
+            else:
+                console.print(f"[bold green]✅ DNS container '{dns_container}' is running[/bold green]")
     elif dns_exists:
         console.print(f"[green]ℹ️  DNS container '{dns_container}' is already running[/green]")
     else:
         console.print(f"[yellow]ℹ️  DNS container '{dns_container}' does not exist[/yellow]")
         console.print(f"[dim]Tip: Run [bold]loko create[/bold] to recreate the full environment[/dim]")
 
-    console.print(f"[bold green]✅ Environment '{cluster_name}' started[/bold green]")
+            # Verify all containers are running
+        all_running = True
+        for container in containers:
+            running_containers = runner.list_containers(name_filter=container, status_filter="running", format_expr="{{.Names}}", check=False)
+            if container not in running_containers:
+                all_running = False
+                console.print(f"[yellow]⚠️  Container '{container}' failed to start[/yellow]")
+        if all_running:
+            console.print(f"[bold green]✅ All containers for '{cluster_name}' are running[/bold green]")
+        else:
+            console.print(f"[red]❌ Some containers failed to start for '{cluster_name}'[/red]")
+        console.print(f"[bold green]✅ Environment '{cluster_name}' started[/bold green]")
+
+    # Print environment summary
+    print_environment_summary(config)
 
 
 def stop(config_file: ConfigArg = "loko.yaml") -> None:
@@ -111,13 +136,15 @@ def stop(config_file: ConfigArg = "loko.yaml") -> None:
     if cluster_exists:
         containers = runner.list_containers(name_filter=cluster_name, all_containers=True, format_expr="{{.Names}}")
         for container in containers:
-            if runner.list_containers(name_filter=container, status_filter="running", quiet=True, check=False):
+            running_containers = runner.list_containers(name_filter=container, status_filter="running", format_expr="{{.Names}}", check=False)
+            if container in running_containers:
                 cluster_running = True
                 break
 
     from loko.utils import get_dns_container_name
     dns_container = get_dns_container_name(cluster_name)
-    dns_running = bool(runner.list_containers(name_filter=dns_container, status_filter="running", quiet=True, check=False))
+    running_containers = runner.list_containers(name_filter=dns_container, status_filter="running", format_expr="{{.Names}}", check=False)
+    dns_running = dns_container in running_containers
 
     # If nothing is running, report and exit early
     if not cluster_running and not dns_running:
@@ -133,8 +160,8 @@ def stop(config_file: ConfigArg = "loko.yaml") -> None:
             containers = runner.list_containers(name_filter=cluster_name, all_containers=True, format_expr="{{.Names}}")
             console.print(f"[blue]Stopping cluster containers...[/blue]")
             for container in containers:
-                running = runner.list_containers(name_filter=container, status_filter="running", quiet=True, check=False)
-                if running:
+                running_containers = runner.list_containers(name_filter=container, status_filter="running", format_expr="{{.Names}}", check=False)
+                if container in running_containers:
                     console.print(f"  ⏳ Stopping {container}...")
                     runner.run_command([runtime, "stop", container])
                     console.print(f"  ✅ Stopped {container}")
@@ -155,10 +182,24 @@ def stop(config_file: ConfigArg = "loko.yaml") -> None:
         except Exception as e:
             console.print(f"[yellow]⚠️  Could not stop DNS container: {e}[/yellow]")
     else:
-        dns_exists = bool(runner.list_containers(name_filter=dns_container, all_containers=True, quiet=True, check=False))
+        existing_containers = runner.list_containers(name_filter=dns_container, all_containers=True, format_expr="{{.Names}}", check=False)
+        dns_exists = dns_container in existing_containers
         if dns_exists:
             console.print(f"[green]ℹ️  DNS container '{dns_container}' is already stopped[/green]")
         else:
             console.print(f"[yellow]ℹ️  DNS container '{dns_container}' does not exist[/yellow]")
 
-    console.print(f"[bold green]✅ Environment '{cluster_name}' stopped[/bold green]")
+            # Verify all containers are stopped
+        all_stopped = True
+        # Get list of containers for the cluster
+        containers_check = runner.list_containers(name_filter=cluster_name, all_containers=True, format_expr="{{.Names}}")
+        for container in containers_check:
+            running_containers = runner.list_containers(name_filter=container, status_filter="running", format_expr="{{.Names}}", check=False)
+            if container in running_containers:
+                all_stopped = False
+                console.print(f"[yellow]⚠️  Container '{container}' failed to stop[/yellow]")
+        if all_stopped:
+            console.print(f"[bold green]✅ All containers for '{cluster_name}' are stopped[/bold green]")
+        else:
+            console.print(f"[red]❌ Some containers failed to stop for '{cluster_name}'[/red]")
+        console.print(f"[bold green]✅ Environment '{cluster_name}' stopped[/bold green]")

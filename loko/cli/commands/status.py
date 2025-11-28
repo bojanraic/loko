@@ -2,6 +2,7 @@
 import os
 import sys
 from rich.console import Console
+from rich.table import Table
 
 from loko.utils import get_dns_container_name
 from loko.validators import ensure_config_file, ensure_docker_running
@@ -151,6 +152,41 @@ def status(config_file: ConfigArg = "loko.yaml") -> None:
         except:
             console.print("[bold]☸️  Kubernetes Nodes:[/bold]")
             console.print("[yellow]⚠️  Could not fetch node status (kubectl may not be configured)[/yellow]\n")
+
+        # Quick Reference - Service Access Info
+        console.print("[bold]🔗 Quick Reference - Service Access:[/bold]")
+
+        # Determine the app domain
+        if config.environment.use_apps_subdomain:
+            app_domain = f"{config.environment.apps_subdomain}.{config.environment.local_domain}"
+        else:
+            app_domain = config.environment.local_domain
+
+        # Service DNS Names
+        enabled_services = [svc for svc in config.environment.services.system if svc.enabled]
+        if enabled_services:
+            table = Table(show_header=True, header_style="bold magenta", box=None, padding=(0, 2))
+            table.add_column("Service", style="cyan")
+            table.add_column("DNS Name", style="yellow")
+            table.add_column("Ports", style="green")
+
+            for svc in enabled_services:
+                dns_name = f"{svc.name}.{config.environment.local_domain}"
+                ports = ", ".join(str(p) for p in svc.ports) if svc.ports else "N/A"
+                table.add_row(svc.name, dns_name, ports)
+
+            console.print(table)
+
+        # Service secrets file
+        secrets_file = os.path.join(os.path.expandvars(config.environment.base_dir), config.environment.name, 'service-secrets.txt')
+        if os.path.exists(secrets_file):
+            console.print(f"├── Service Credentials: [yellow]{secrets_file}[/yellow]")
+
+        # App deployment info
+        console.print(f"├── Apps Domain: [yellow]https://<app-name>.{app_domain}[/yellow]")
+        console.print(f"├── Registry: [yellow]{config.environment.registry.name}.{config.environment.local_domain}[/yellow]")
+        console.print(f"└── Kubeconfig Context: [yellow]kind-{config.environment.name}[/yellow]")
+        console.print()
 
     except Exception as e:
         console.print(f"[bold red]Error checking status: {e}[/bold red]")
