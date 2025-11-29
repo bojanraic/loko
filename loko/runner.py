@@ -503,11 +503,21 @@ Domains=~{self.env.local_domain}
                 ).stdout.strip().lstrip('/')
                 
                 console.print(f"  📝 Updating DNS for node: {node_name}")
-                
-                # Append our DNS as secondary nameserver (after Docker's DNS)
-                # This preserves Docker's internal DNS (127.0.0.11) for node-to-node resolution
-                # while adding our DNS for external *.dev.me domains
-                inject_cmd = f"if ! grep -q '^nameserver {dns_ip}$' /etc/resolv.conf; then echo 'nameserver {dns_ip}' >> /etc/resolv.conf; fi"
+
+                # Prepend our DNS as primary nameserver (before Docker's DNS)
+                # This ensures our custom DNS resolver is tried first for *.dev.me domains
+                # Docker's DNS (172.19.0.1) will still be available as fallback
+                # Note: Using temp file approach because /etc/resolv.conf is bind-mounted by Docker
+                # Check if our DNS is NOT the first nameserver (not just if it exists anywhere)
+                # Using || logic because sh shell in Kind nodes doesn't support 'if !' syntax
+                inject_cmd = (
+                    f"head -n 1 /etc/resolv.conf | grep -q '^nameserver {dns_ip}$' || ("
+                    f"cat /etc/resolv.conf > /tmp/resolv.conf.bak && "
+                    f"echo 'nameserver {dns_ip}' > /tmp/resolv.conf.new && "
+                    f"grep -v '^nameserver {dns_ip}' /tmp/resolv.conf.bak >> /tmp/resolv.conf.new && "
+                    f"cat /tmp/resolv.conf.new > /etc/resolv.conf"
+                    f")"
+                )
                 
                 result = self.run_command(
                     [self.runtime, "exec", node_id, "/bin/sh", "-c", inject_cmd],
