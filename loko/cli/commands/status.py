@@ -4,7 +4,7 @@ import sys
 from rich.console import Console
 from rich.table import Table
 
-from loko.utils import get_dns_container_name
+from loko.utils import PASSWORD_PROTECTED_SERVICES, get_dns_container_name
 from loko.validators import ensure_config_file, ensure_docker_running
 from loko.runner import CommandRunner
 from loko.cli_types import ConfigArg
@@ -119,12 +119,15 @@ def status(config_file: ConfigArg = "loko.yaml") -> None:
         console.print("[bold]🔍 DNS Service:[/bold]")
         dns_container = get_dns_container_name(cluster_name)
         dns_status = runner.list_containers(name_filter=dns_container, format_expr="{{.Names}}\t{{.Status}}", check=False)
+        resolver_port = config.environment.local_dns_port
         if dns_status:
             name, status_str = dns_status[0].split('\t', 1)
             console.print(f"├── Container: {name}")
-            console.print(f"└── Status: {status_str}\n")
+            console.print(f"├── Status: {status_str}")
+            console.print(f"└── Port: {resolver_port}\n")
         else:
-            console.print("└── [yellow]DNS container not running[/yellow]\n")
+            console.print(f"├── [yellow]DNS container not running[/yellow]")
+            console.print(f"└── Port: {resolver_port}\n")
 
         # Container Status
         containers_status = runner.list_containers(name_filter=cluster_name, all_containers=True, format_expr="{{.Names}}\t{{.Status}}")
@@ -177,15 +180,24 @@ def status(config_file: ConfigArg = "loko.yaml") -> None:
 
             console.print(table)
 
-        # Service secrets file
-        secrets_file = os.path.join(os.path.expandvars(config.environment.base_dir), config.environment.name, 'service-secrets.txt')
-        if os.path.exists(secrets_file):
+        password_services_enabled = {
+            svc.name
+            for svc in (config.environment.services.system + config.environment.services.user)
+            if svc.enabled and svc.name in PASSWORD_PROTECTED_SERVICES
+        }
+
+        if password_services_enabled:
+            secrets_file = os.path.join(os.path.expandvars(config.environment.base_dir), config.environment.name, 'service-secrets.txt')
             console.print(f"├── Service Credentials: [yellow]{secrets_file}[/yellow]")
 
         # App deployment info
-        console.print(f"├── Apps Domain: [yellow]https://<app-name>.{app_domain}[/yellow]")
-        console.print(f"├── Registry: [yellow]{config.environment.registry.name}.{config.environment.local_domain}[/yellow]")
-        console.print(f"└── Kubeconfig Context: [yellow]kind-{config.environment.name}[/yellow]")
+        kube_context = f"kind-{config.environment.name}"
+        registry_host = f"{config.environment.registry.name}.{config.environment.local_domain}"
+        app_domain_display = f"https://<app-name>.{app_domain}"
+
+        console.print(f"├── Kubeconfig Context: [yellow]{kube_context}[/yellow]")
+        console.print(f"├── Registry: [yellow]{registry_host}[/yellow]")
+        console.print(f"└── Apps Domain: [yellow]{app_domain_display}[/yellow]")
         console.print()
 
     except Exception as e:

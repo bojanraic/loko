@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import List, Optional
 from rich.console import Console
 from .config import RootConfig
-from .utils import get_dns_container_name, is_port_in_use
+from .utils import PASSWORD_PROTECTED_SERVICES, get_dns_container_name, is_port_in_use
 
 console = Console()
 
@@ -244,14 +244,18 @@ class CommandRunner:
         tcp_routes_file = os.path.join(self.k8s_dir, "config", "traefik-tcp-routes.yaml")
 
         if not os.path.exists(tcp_routes_file):
-            console.print("[yellow]⚠️  TCP routes file not found, skipping[/yellow]")
             return
 
         # Check if there's content to apply (file might be empty if no services have ports)
         with open(tcp_routes_file, 'r') as f:
-            content = f.read().strip()
+            lines = [line for line in f if line.strip()]
 
-        if not content:
+        has_manifest_content = any(
+            not line.lstrip().startswith('#') and line.strip() != '---'
+            for line in lines
+        )
+
+        if not has_manifest_content:
             console.print("ℹ️  No TCP routes to deploy")
             return
 
@@ -645,6 +649,9 @@ Domains=~{self.env.local_domain}
 
     def label_nodes(self):
         """Label worker nodes."""
+        if self.env.nodes.workers <= 0:
+            return
+
         console.print("🔄 Labeling worker nodes...")
         
         try:
@@ -723,25 +730,32 @@ Domains=~{self.env.local_domain}
 
     def fetch_service_secrets(self):
         """Fetch and extract service credentials to a file."""
+        service_configs = {
+            'mysql': ('root', 'settings.rootPassword.value'),
+            'postgres': ('postgres', 'settings.superuserPassword.value'),
+            'mongodb': ('root', 'settings.rootPassword'),
+            'rabbitmq': ('admin', 'authentication.password.value'),
+            'valkey': ('default', 'settings.password'),  # valkey might not have auth by default
+        }
+
+        all_services = list(self.env.services.system) + list(self.env.services.user)
+        enabled_service_names = {
+            svc.name for svc in all_services if getattr(svc, "enabled", False)
+        }
+        password_services = enabled_service_names.intersection(PASSWORD_PROTECTED_SERVICES)
+
+        if not password_services:
+            return
+
         console.print("🔄 Fetching service credentials...")
 
         try:
             # Service configurations mapping service name to username and Helm value path
-            service_configs = {
-                'mysql': ('root', 'settings.rootPassword.value'),
-                'postgres': ('postgres', 'settings.superuserPassword.value'),
-                'mongodb': ('root', 'settings.rootPassword'),
-                'rabbitmq': ('admin', 'authentication.password.value'),
-                'valkey': ('default', 'settings.password'),  # valkey might not have auth by default
-            }
-
             output_file = os.path.join(self.k8s_dir, 'service-secrets.txt')
             found_any = False
-
-            # Clear/create the output file
-            with open(output_file, 'w') as f:
-                f.write(f"# Service Credentials for {self.env.name}\n")
-                f.write(f"# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            file_initialized = False
+            if os.path.exists(output_file):
+                os.remove(output_file)
 
             console.print("  🔍 Extracting passwords from Helm release values...")
 
@@ -765,6 +779,9 @@ Domains=~{self.env.local_domain}
 
             # Process each configured service
             for service_name, (username, value_path) in service_configs.items():
+                if service_name not in password_services:
+                    continue
+
                 # Find if this service is deployed
                 release_info = next((r for r in releases if r['name'] == service_name), None)
 
@@ -793,6 +810,12 @@ Domains=~{self.env.local_domain}
                                     break
 
                             if password and password != "null":
+                                if not file_initialized:
+                                    with open(output_file, 'w') as f:
+                                        f.write(f"# Service Credentials for {self.env.name}\n")
+                                        f.write(f"# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                                    file_initialized = True
+
                                 # Write to file
                                 with open(output_file, 'a') as f:
                                     f.write(f"Service: {service_name}\n")
@@ -813,7 +836,6 @@ Domains=~{self.env.local_domain}
             if found_any:
                 console.print("")
                 console.print("🔑 Service credentials extracted successfully")
-                console.print(f"📝 Secrets saved to: [bold]{output_file}[/bold]")
             else:
                 console.print("  ⚠️  No service credentials found. Services may not be deployed yet or passwords may not be in Helm values.")
 
@@ -953,7 +975,3 @@ Domains=~{self.env.local_domain}
             
         except Exception as e:
             console.print(f"  [yellow]⚠️  Error during cleanup: {e}[/yellow]")
-
-
-
-

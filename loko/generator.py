@@ -273,8 +273,20 @@ class ConfigGenerator:
             'helmfile.yaml': 'helmfile/helmfile.yaml.j2',
             'traefik-tcp-routes.yaml': 'traefik-tcp-routes.yaml.j2'
         }
-        
+
+        has_tcp_routes = any(
+            service.get('ports')
+            for service in context['system_services']
+            if service.get('ports')
+        )
+
         for filename, template_name in files.items():
+            if filename == 'traefik-tcp-routes.yaml' and not has_tcp_routes:
+                tcp_path = f"{self.k8s_dir}/config/{filename}"
+                if os.path.exists(tcp_path):
+                    os.remove(tcp_path)
+                continue
+
             template = self.jinja_env.get_template(template_name)
             content = template.render(**context)
             with open(f"{self.k8s_dir}/config/{filename}", 'w') as f:

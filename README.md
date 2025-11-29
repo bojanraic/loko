@@ -462,6 +462,7 @@ environment:
   # Network configuration
   local-ip: string                # Local IP for DNS resolution
   local-domain: string            # Domain name
+  local-dns-port: integer         # DNS resolver port (default 53)
   local-lb-ports: array           # Load balancer ports
   use-apps-subdomain: boolean     # Use apps subdomain
   apps-subdomain: string          # Subdomain for apps
@@ -493,6 +494,10 @@ loko init --name my-cluster --workers 3 --registry-storage 50Gi --no-schedule-on
 ```
 
 See `loko init --help` for all available overrides.
+
+### Custom DNS Port
+
+Loko runs a lightweight DNS container on your machine so that services such as `postgres.dev.me` resolve locally. By default it binds to the standard DNS port 53, but some hosts already listen on that port. If you need to avoid a conflict, set `local-dns-port` in `loko.yaml` (or pass `--local-dns-port` to `loko init`). Loko will start the DNS container on the specified port and automatically update the `/etc/resolver/<domain>` entry so lookups continue to work.
 
 ## Troubleshooting
 

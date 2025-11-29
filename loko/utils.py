@@ -10,6 +10,14 @@ from .config import RootConfig
 
 console = Console()
 
+PASSWORD_PROTECTED_SERVICES = {
+    "mysql",
+    "postgres",
+    "mongodb",
+    "rabbitmq",
+    "valkey",
+}
+
 def load_config(config_path: str) -> RootConfig:
     """Load configuration from a YAML file."""
     with open(config_path, "r") as f:
@@ -84,9 +92,14 @@ def print_environment_summary(config: RootConfig):
     else:
         console.print(f"\n[dim]No system services enabled[/dim]")
 
-    # Service secrets file
-    secrets_file = os.path.join(os.path.expandvars(env.base_dir), env.name, 'service-secrets.txt')
-    if os.path.exists(secrets_file):
+    password_services_enabled = {
+        svc.name
+        for svc in (env.services.system + env.services.user)
+        if svc.enabled and svc.name in PASSWORD_PROTECTED_SERVICES
+    }
+
+    if password_services_enabled:
+        secrets_file = os.path.join(os.path.expandvars(env.base_dir), env.name, 'service-secrets.txt')
         console.print(f"\n[bold cyan]Service Credentials:[/bold cyan]")
         console.print(f"  Location: [yellow]{secrets_file}[/yellow]")
 
