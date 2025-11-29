@@ -1,8 +1,7 @@
 # DNS configuration for {{ env_name }} environment
 
-# Use Google and Cloudflare DNS servers as upstream resolvers for non-local domains
-server=8.8.8.8
-server=1.1.1.1
+# Use upstream resolvers from container /etc/resolv.conf (inherited from host)
+
 
 # Strict/exact match for registry and system services
 
