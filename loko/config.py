@@ -60,6 +60,7 @@ class EnvironmentConfig(BaseModel):
     provider: ProviderConfig
     kubernetes: KubernetesConfig
     nodes: NodesConfig
+    local_dns_port: int = Field(default=53, alias="local-dns-port")
     local_ip: str = Field(alias="local-ip")
     local_domain: str = Field(alias="local-domain")
     use_apps_subdomain: bool = Field(default=True, alias="use-apps-subdomain")

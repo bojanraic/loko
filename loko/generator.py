@@ -246,7 +246,7 @@ class ConfigGenerator:
             'allow_control_plane_scheduling': self.env.nodes.allow_scheduling_on_control_plane,
             'internal_components_on_control_plane': self.env.nodes.internal_components_on_control_plane,
             'root_ca_path': os.path.abspath(f"{self.k8s_dir}/certs/rootCA.pem"),
-            'dns_port': 53, # Default
+            'dns_port': self.env.local_dns_port,
             'kubernetes_full_image': f"{self.env.kubernetes.image}:{self.env.kubernetes.tag}" if self.env.kubernetes.tag else self.env.kubernetes.image
         }
         

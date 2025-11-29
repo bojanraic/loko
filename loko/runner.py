@@ -282,10 +282,13 @@ class CommandRunner:
 
         # Use alternate DNS port in CI environments where port 53 may be in use
         is_ci = os.getenv("CI") == "true" or os.getenv("GITHUB_ACTIONS") == "true"
-        dns_port = "5353" if is_ci else "53"
+        # Prioritize CI env var, then config, then default 53
+        dns_port = "5353" if is_ci else str(self.env.local_dns_port)
 
         if is_ci:
-            console.print(f"[yellow]ℹ️  CI environment detected, using port {dns_port} for DNS[/yellow]")
+            console.print(f"[yellow]ℹ️  CI environment detected, overriding DNS port to {dns_port}[/yellow]")
+        elif self.env.local_dns_port != 53:
+            console.print(f"ℹ️  Using configured custom DNS port: {dns_port}")
 
         # Check if port is available
         if is_port_in_use(int(dns_port)):
@@ -339,7 +342,7 @@ class CommandRunner:
                 self.run_command(['sudo', 'mkdir', '-p', resolver_dir])
             
             # Create resolver content
-            resolver_content = f"nameserver {self.env.local_ip}\n"
+            resolver_content = f"nameserver {self.env.local_ip}\nport {self.env.local_dns_port}\n"
             
             # Write to temp file first
             temp_file = f'/tmp/resolver_file_{self.env.local_domain}'
@@ -373,8 +376,10 @@ class CommandRunner:
                 console.print("  🔧 Configuring systemd-resolved...")
                 
                 # Create resolved config
+                # systemd-resolved supports port in DNS=IP:PORT format
+                dns_entry = f"{self.env.local_ip}:{self.env.local_dns_port}" if self.env.local_dns_port != 53 else self.env.local_ip
                 resolved_conf = f"""[Resolve]
-DNS={self.env.local_ip}
+DNS={dns_entry}
 Domains=~{self.env.local_domain}
 """
                 temp_file = f'/tmp/resolved_{self.env.local_domain}.conf'

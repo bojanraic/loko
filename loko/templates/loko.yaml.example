@@ -61,6 +61,7 @@ environment:
       #     tier: "compute" 
       #     zone: "us-west-1b"
 
+  local-dns-port: 53 # port for the local DNS resolver (dnsmasq)
   local-ip: 192.168.0.10 # local ip, mapping to the host IP to use for DNS resolution and wildcard certificates
   local-domain: dev.me # a domain name to use for custom dns resolution and wildcard certificates
   use-apps-subdomain: true # whether to use apps subdomain for applications (false = use direct domain)
