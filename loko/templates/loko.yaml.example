@@ -187,7 +187,7 @@ environment:
             ref: groundhog2k # reference to helm-repositories entry
           chart: groundhog2k/valkey # the chart to use
           # renovate: datasource=helm depName=valkey repositoryUrl=https://groundhog2k.github.io/helm-charts
-          version: 2.2.2
+          version: 2.2.3
           # Valkey persistence handled automatically (no authentication)
 
     # User services - additional services users can add without presets
