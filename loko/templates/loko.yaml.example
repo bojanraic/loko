@@ -117,7 +117,7 @@ environment:
             ref: groundhog2k # reference to helm-repositories entry
           chart: groundhog2k/mysql # the chart to use
           # renovate: datasource=helm depName=mysql repositoryUrl=https://groundhog2k.github.io/helm-charts
-          version: 3.0.7
+          version: 3.0.8
           # MySQL authentication and persistence handled automatically
 
       - name: postgres
