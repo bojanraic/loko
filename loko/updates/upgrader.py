@@ -27,7 +27,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from rich.console import Console
 from ruamel.yaml import YAML
 from .yaml_walker import walk_yaml_for_renovate
-from .fetchers import fetch_latest_version
+from .fetchers import fetch_latest_version, fetch_latest_helm_versions_batch
 
 console = Console()
 
@@ -66,31 +66,89 @@ def upgrade_config(config_file: str) -> None:
         total_fetch_time = time.time()
 
         with ThreadPoolExecutor(max_workers=5) as executor:
-            # Submit all fetch tasks
+            # Group updates by datasource
+            docker_updates = []
+            helm_updates_by_repo = {}  # repo_url -> list of (path, key, renovate_info, current_value, parent)
+
+            for item in updates_to_check:
+                path, key, renovate_info, current_value, parent = item
+                if renovate_info.get('datasource') == 'helm':
+                    repo_url = renovate_info.get('repositoryUrl')
+                    if repo_url:
+                        if repo_url not in helm_updates_by_repo:
+                            helm_updates_by_repo[repo_url] = []
+                        helm_updates_by_repo[repo_url].append(item)
+                    else:
+                        # Fallback to individual fetch if no repo URL (it will use default logic in fetcher)
+                        docker_updates.append(item) # Treat as generic individual task
+                else:
+                    docker_updates.append(item)
+
             future_to_info = {}
-            for path, key, renovate_info, current_value, parent in updates_to_check:
-                future = executor.submit(fetch_latest_version, renovate_info)
-                future_to_info[future] = (path, key, renovate_info, current_value, parent)
-                console.print(f"🔍 Checking {renovate_info['depName']} ({renovate_info['datasource']})...")
+            
+            # Use a Rich status spinner that updates for each component
+            with console.status("", spinner="dots") as status:
+                # Submit Docker/Individual tasks
+                for path, key, renovate_info, current_value, parent in docker_updates:
+                    future = executor.submit(fetch_latest_version, renovate_info)
+                    future_to_info[future] = (path, key, renovate_info, current_value, parent, 'single')
+                    status.update(f"Checking {renovate_info['depName']} ({renovate_info['datasource']})…")
 
-            # Process results as they complete
-            for future in as_completed(future_to_info):
-                path, key, renovate_info, current_value, parent = future_to_info[future]
-                try:
-                    latest_version, fetch_time = future.result()
+                # Submit Batch Helm tasks
+                for repo_url, items in helm_updates_by_repo.items():
+                    dep_names = [item[2]['depName'] for item in items]
+                    future = executor.submit(fetch_latest_helm_versions_batch, repo_url, dep_names)
+                    # Store the list of items associated with this future
+                    future_to_info[future] = (repo_url, items, 'batch')
+                    status.update(f"Checking {len(items)} charts from {repo_url}…")
 
-                    # Track timing by datasource
-                    if renovate_info['datasource'] == 'helm':
-                        helm_timing += fetch_time
-                    elif renovate_info['datasource'] == 'docker':
-                        docker_timing += fetch_time
+                # Process results as they complete
+                for future in as_completed(future_to_info):
+                    info = future_to_info[future]
+                    task_type = info[-1]
 
-                    if latest_version and str(current_value) != latest_version:
-                        # Update the value in the YAML structure
-                        parent[key] = latest_version
-                        updates_made.append(f"  {renovate_info['depName']}: {current_value} → {latest_version}")
-                except Exception as e:
-                    console.print(f"[yellow]Error fetching version for {renovate_info['depName']}: {e}[/yellow]")
+                    if task_type == 'single':
+                        path, key, renovate_info, current_value, parent, _ = info
+                        status.update(f"Checking {renovate_info['depName']} ({renovate_info['datasource']})…")
+                        try:
+                            latest_version, fetch_time = future.result()
+                            
+                            if renovate_info['datasource'] == 'helm':
+                                helm_timing = max(helm_timing, fetch_time)
+                            elif renovate_info['datasource'] == 'docker':
+                                docker_timing = max(docker_timing, fetch_time)
+
+                            if latest_version and str(current_value) != latest_version:
+                                parent[key] = latest_version
+                                updates_made.append(f"  {renovate_info['depName']}: {current_value} → {latest_version}")
+                        except Exception as e:
+                            console.print(f"[yellow]Error fetching version for {renovate_info['depName']}: {e}[/yellow]")
+                    
+                    elif task_type == 'batch':
+                        repo_url, items, _ = info
+                        dep_names = [item[2]['depName'] for item in items]
+                        status.update(f"Checking {', '.join(dep_names)} (helm)…")
+                        try:
+                            results = future.result() # dict[dep_name] -> (version, time)
+                            
+                            # All items in this batch share the same fetch time (roughly)
+                            # We can take the max time from the batch results for helm_timing
+                            batch_max_time = 0.0
+
+                            for path, key, renovate_info, current_value, parent in items:
+                                dep_name = renovate_info['depName']
+                                if dep_name in results:
+                                    latest_version, fetch_time = results[dep_name]
+                                    batch_max_time = max(batch_max_time, fetch_time)
+                                    
+                                    if latest_version and str(current_value) != latest_version:
+                                        parent[key] = latest_version
+                                        updates_made.append(f"  {dep_name}: {current_value} → {latest_version}")
+                            
+                            helm_timing = max(helm_timing, batch_max_time)
+
+                        except Exception as e:
+                            console.print(f"[yellow]Error fetching batch versions from {repo_url}: {e}[/yellow]")
 
         total_fetch_time = time.time() - total_fetch_time
 

@@ -79,35 +79,21 @@ def fetch_latest_docker_version(dep_name: str) -> tuple[Optional[str], float]:
         return None, time.time() - start_time
 
 
-def fetch_latest_helm_version(dep_name: str, repository_url: Optional[str] = None) -> tuple[Optional[str], float]:
+def fetch_latest_helm_versions_batch(repository_url: str, dep_names: list[str]) -> dict[str, tuple[Optional[str], float]]:
     """
-    Fetch the latest version of a Helm chart from a Helm repository.
-    Returns tuple of (version, elapsed_time_seconds)
+    Fetch the latest versions for multiple charts from a single Helm repository.
+    Returns a dict mapping dep_name -> (version, elapsed_time_seconds)
     """
     start_time = time.time()
+    results = {name: (None, 0.0) for name in dep_names}
+
+    if not repository_url:
+        console.print(f"[yellow]Warning: No repository URL provided for batch fetch[/yellow]")
+        return results
+
     try:
-        # Default Helm chart repositories
-        default_repos = {
-            'app-template': 'https://bjw-s-labs.github.io/helm-charts',
-            'traefik': 'https://traefik.github.io/charts',
-            'metrics-server': 'https://kubernetes-sigs.github.io/metrics-server',
-            'mysql': 'https://groundhog2k.github.io/helm-charts',
-            'postgres': 'https://groundhog2k.github.io/helm-charts',
-            'mongodb': 'https://groundhog2k.github.io/helm-charts',
-            'rabbitmq': 'https://groundhog2k.github.io/helm-charts',
-            'valkey': 'https://groundhog2k.github.io/helm-charts',
-            'http-webhook': 'https://charts.securecodebox.io',
-        }
-
-        # Use provided repository URL or fall back to defaults
-        repo_url = repository_url or default_repos.get(dep_name)
-
-        if not repo_url:
-            console.print(f"[yellow]Warning: No repository URL found for {dep_name}[/yellow]")
-            return None, time.time() - start_time
-
         # Fetch index.yaml from Helm repository
-        index_url = f"{repo_url.rstrip('/')}/index.yaml"
+        index_url = f"{repository_url.rstrip('/')}/index.yaml"
 
         # Add User-Agent header and small delay to avoid rate limiting
         req = urllib.request.Request(
@@ -124,37 +110,73 @@ def fetch_latest_helm_version(dep_name: str, repository_url: Optional[str] = Non
         fetch_start = time.time()
         with urllib.request.urlopen(req) as response:
             index_data = yaml.safe_load(response.read())
-        fetch_time = time.time() - fetch_start
+        fetch_duration = time.time() - fetch_start
 
         # Get chart entries
         entries = index_data.get('entries', {})
-        chart_versions = entries.get(dep_name, [])
 
-        if not chart_versions:
-            console.print(f"[yellow]Warning: No versions found for chart {dep_name}[/yellow]")
-            return None, time.time() - start_time
-
-        # Charts are usually sorted by version in descending order
-        # Get the latest stable (non-prerelease) version using packaging.version
-        for version_info in chart_versions:
-            version_str = version_info.get('version', '')
-            if not version_str:
-                continue
-            try:
-                parsed_version = parse_version(version_str)
-                # Only return stable releases (not pre-release, dev, or post-release)
-                if not parsed_version.is_prerelease:
-                    return version_str, time.time() - start_time
-            except Exception:
-                # Skip invalid versions
+        for dep_name in dep_names:
+            chart_versions = entries.get(dep_name, [])
+            
+            if not chart_versions:
+                console.print(f"[yellow]Warning: No versions found for chart {dep_name} in {repository_url}[/yellow]")
+                results[dep_name] = (None, fetch_duration) # Assign fetch time even if not found
                 continue
 
-        # If no stable version found, return None (don't fall back to prerelease)
-        return None, time.time() - start_time
+            found_version = None
+            # Charts are usually sorted by version in descending order
+            for version_info in chart_versions:
+                version_str = version_info.get('version', '')
+                if not version_str:
+                    continue
+                try:
+                    parsed_version = parse_version(version_str)
+                    # Only return stable releases (not pre-release, dev, or post-release)
+                    if not parsed_version.is_prerelease:
+                        found_version = version_str
+                        break
+                except Exception:
+                    continue
+            
+            results[dep_name] = (found_version, fetch_duration)
+
+        return results
 
     except Exception as e:
-        console.print(f"[yellow]Warning: Could not fetch Helm version for {dep_name}: {e}[/yellow]")
-        return None, time.time() - start_time
+        console.print(f"[yellow]Warning: Could not fetch Helm versions from {repository_url}: {e}[/yellow]")
+        # Return fetch time even on error so we don't skew stats too much if it was a timeout etc
+        elapsed = time.time() - start_time
+        return {name: (None, elapsed) for name in dep_names}
+
+
+def fetch_latest_helm_version(dep_name: str, repository_url: Optional[str] = None) -> tuple[Optional[str], float]:
+    """
+    Fetch the latest version of a Helm chart from a Helm repository.
+    Returns tuple of (version, elapsed_time_seconds)
+    """
+    # Default Helm chart repositories
+    default_repos = {
+        'app-template': 'https://bjw-s-labs.github.io/helm-charts',
+        'traefik': 'https://traefik.github.io/charts',
+        'metrics-server': 'https://kubernetes-sigs.github.io/metrics-server',
+        'mysql': 'https://groundhog2k.github.io/helm-charts',
+        'postgres': 'https://groundhog2k.github.io/helm-charts',
+        'mongodb': 'https://groundhog2k.github.io/helm-charts',
+        'rabbitmq': 'https://groundhog2k.github.io/helm-charts',
+        'valkey': 'https://groundhog2k.github.io/helm-charts',
+        'http-webhook': 'https://charts.securecodebox.io',
+    }
+
+    # Use provided repository URL or fall back to defaults
+    repo_url = repository_url or default_repos.get(dep_name)
+    
+    if not repo_url:
+         console.print(f"[yellow]Warning: No repository URL found for {dep_name}[/yellow]")
+         return None, 0.0
+
+    # Use the batch function for a single item
+    results = fetch_latest_helm_versions_batch(repo_url, [dep_name])
+    return results[dep_name]
 
 
 def fetch_latest_version(renovate_info: dict) -> tuple[Optional[str], float]:
