@@ -103,16 +103,17 @@ def status(config_file: ConfigArg = "loko.yaml") -> None:
 
         # Cluster Info
         console.print("[bold]🏢 Cluster Information:[/bold]")
-        try:
-            result = runner.run_command(
-                ["kubectl", "cluster-info"],
-                capture_output=True
-            )
+        result = runner.run_command(
+            ["kubectl", "cluster-info"],
+            capture_output=True,
+            check=False
+        )
+        if result.returncode == 0:
             for line in result.stdout.strip().split('\n'):
                 if line.strip():
                     console.print(f"├── {line.strip()}")
-        except:
-            console.print("├── [yellow]kubectl not configured[/yellow]")
+        else:
+            console.print("├── [yellow]Cluster not accessible (stopped or kubectl not configured)[/yellow]")
         console.print()
 
         # DNS Service
@@ -145,16 +146,16 @@ def status(config_file: ConfigArg = "loko.yaml") -> None:
             console.print()
 
         # Kubernetes Nodes
-        try:
-            result = runner.run_command(
-                ["kubectl", "get", "nodes", "-o", "wide"],
-                capture_output=True
-            )
-            console.print("[bold]☸️  Kubernetes Nodes:[/bold]")
+        console.print("[bold]☸️  Kubernetes Nodes:[/bold]")
+        result = runner.run_command(
+            ["kubectl", "get", "nodes", "-o", "wide"],
+            capture_output=True,
+            check=False
+        )
+        if result.returncode == 0:
             console.print(result.stdout)
-        except:
-            console.print("[bold]☸️  Kubernetes Nodes:[/bold]")
-            console.print("[yellow]⚠️  Could not fetch node status (kubectl may not be configured)[/yellow]\n")
+        else:
+            console.print("[yellow]⚠️  Could not fetch node status (cluster stopped or kubectl not configured)[/yellow]\n")
 
         # Quick Reference - Service Access Info
         console.print("[bold]🔗 Quick Reference - Service Access:[/bold]")
