@@ -370,9 +370,9 @@ def create(
     )
     runner = CommandRunner(config)
 
-    runner.start_dnsmasq()
     runner.setup_resolver_file()
     runner.create_cluster()
+    runner.start_dnsmasq()
     runner.inject_dns_nameserver()
     runner.fetch_kubeconfig()
     runner.wait_for_cluster_ready()
