@@ -22,9 +22,10 @@ def sample_config_with_renovate(temp_dir):
     return config_path
 
 
+@patch('loko.updates.upgrader.fetch_latest_helm_versions_batch')
 @patch('loko.updates.upgrader.fetch_latest_version')
 @patch('shutil.copy')
-def test_upgrade_config_with_updates(mock_copy, mock_fetch, sample_config_with_renovate):
+def test_upgrade_config_with_updates(mock_copy, mock_fetch, mock_fetch_batch, sample_config_with_renovate):
     """Test upgrading config when updates are available."""
     # Mock version fetching to return newer versions
     def fetch_side_effect(renovate_info):
@@ -35,6 +36,16 @@ def test_upgrade_config_with_updates(mock_copy, mock_fetch, sample_config_with_r
         return (None, 0.0)
 
     mock_fetch.side_effect = fetch_side_effect
+
+    # Mock batch fetching for Helm charts
+    def batch_fetch_side_effect(repo_url, dep_names):
+        results = {}
+        for dep_name in dep_names:
+            if dep_name == 'traefik':
+                results[dep_name] = ("37.3.0", 1.2)
+        return results
+
+    mock_fetch_batch.side_effect = batch_fetch_side_effect
 
     upgrade_config(sample_config_with_renovate)
 
@@ -51,8 +62,9 @@ def test_upgrade_config_with_updates(mock_copy, mock_fetch, sample_config_with_r
         assert '31.0.0' not in content
 
 
+@patch('loko.updates.upgrader.fetch_latest_helm_versions_batch')
 @patch('loko.updates.upgrader.fetch_latest_version')
-def test_upgrade_config_no_updates(mock_fetch, sample_config_with_renovate):
+def test_upgrade_config_no_updates(mock_fetch, mock_fetch_batch, sample_config_with_renovate):
     """Test upgrading config when no updates available."""
     # Mock version fetching to return same versions
     def fetch_side_effect(renovate_info):
@@ -64,6 +76,16 @@ def test_upgrade_config_no_updates(mock_fetch, sample_config_with_renovate):
 
     mock_fetch.side_effect = fetch_side_effect
 
+    # Mock batch fetching to return current versions (no updates)
+    def batch_fetch_side_effect(repo_url, dep_names):
+        results = {}
+        for dep_name in dep_names:
+            if dep_name == 'traefik':
+                results[dep_name] = ("31.0.0", 1.2)
+        return results
+
+    mock_fetch_batch.side_effect = batch_fetch_side_effect
+
     with patch('shutil.copy') as mock_copy:
         upgrade_config(sample_config_with_renovate)
 
@@ -71,8 +93,9 @@ def test_upgrade_config_no_updates(mock_fetch, sample_config_with_renovate):
         mock_copy.assert_not_called()
 
 
+@patch('loko.updates.upgrader.fetch_latest_helm_versions_batch')
 @patch('loko.updates.upgrader.fetch_latest_version')
-def test_upgrade_config_partial_updates(mock_fetch, sample_config_with_renovate):
+def test_upgrade_config_partial_updates(mock_fetch, mock_fetch_batch, sample_config_with_renovate):
     """Test upgrading config when only some components have updates."""
     # Mock one component with update, one without
     def fetch_side_effect(renovate_info):
@@ -83,6 +106,16 @@ def test_upgrade_config_partial_updates(mock_fetch, sample_config_with_renovate)
         return (None, 0.0)
 
     mock_fetch.side_effect = fetch_side_effect
+
+    # Mock batch fetching to return current version (no update)
+    def batch_fetch_side_effect(repo_url, dep_names):
+        results = {}
+        for dep_name in dep_names:
+            if dep_name == 'traefik':
+                results[dep_name] = ("31.0.0", 1.2)
+        return results
+
+    mock_fetch_batch.side_effect = batch_fetch_side_effect
 
     with patch('shutil.copy') as mock_copy:
         upgrade_config(sample_config_with_renovate)
@@ -176,9 +209,10 @@ def test_upgrade_config_invalid_file():
         upgrade_config("/nonexistent/config.yaml")
 
 
+@patch('loko.updates.upgrader.fetch_latest_helm_versions_batch')
 @patch('loko.updates.upgrader.fetch_latest_version')
 @patch('shutil.copy')
-def test_upgrade_config_multiple_components(mock_copy, mock_fetch, temp_dir):
+def test_upgrade_config_multiple_components(mock_copy, mock_fetch, mock_fetch_batch, temp_dir):
     """Test upgrading config with multiple components."""
     config_path = os.path.join(temp_dir, "loko.yaml")
     config_content = """environment:
@@ -213,6 +247,21 @@ def test_upgrade_config_multiple_components(mock_copy, mock_fetch, temp_dir):
         return versions.get(renovate_info['depName'], (None, 0.0))
 
     mock_fetch.side_effect = fetch_side_effect
+
+    # Mock batch fetching for Helm charts
+    def batch_fetch_side_effect(repo_url, dep_names):
+        results = {}
+        version_map = {
+            'traefik': ("37.3.0", 1.0),
+            'metrics-server': ("3.12.0", 0.8),
+            'mysql': ("3.0.7", 1.2)
+        }
+        for dep_name in dep_names:
+            if dep_name in version_map:
+                results[dep_name] = version_map[dep_name]
+        return results
+
+    mock_fetch_batch.side_effect = batch_fetch_side_effect
 
     upgrade_config(config_path)
 

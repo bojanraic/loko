@@ -124,15 +124,19 @@ def test_create_cluster_exists(mock_run, mock_cluster_exists, sample_config):
     runner.create_cluster()
     mock_run.assert_not_called()
 
+@patch.object(CommandRunner, '_apply_node_labels')
 @patch.object(CommandRunner, 'cluster_exists')
 @patch("subprocess.run")
-def test_create_cluster_new(mock_run, mock_cluster_exists, sample_config):
+def test_create_cluster_new(mock_run, mock_cluster_exists, mock_apply_labels, sample_config):
     runner = CommandRunner(sample_config)
     mock_cluster_exists.return_value = False
     runner.create_cluster()
+    # Verify cluster creation was called
     mock_run.assert_called_once()
     assert "create" in mock_run.call_args[0][0]
     assert "cluster" in mock_run.call_args[0][0]
+    # Verify node labels were applied
+    mock_apply_labels.assert_called_once()
 
 @patch.object(CommandRunner, 'cluster_exists')
 @patch.object(CommandRunner, 'run_command')
