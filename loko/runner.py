@@ -126,6 +126,68 @@ class CommandRunner:
         except Exception:
             return False
 
+    def _apply_node_labels(self):
+        """Apply node labels after cluster creation (KIND overrides kubeadm labels)."""
+        console.print("🔄 Applying node labels...")
+
+        # Build label map for control plane nodes
+        for i in range(self.env.nodes.servers):
+            # KIND naming: control-plane, control-plane2, control-plane3, ... (first has no number, rest start at 2)
+            node_name = f"{self.env.name}-control-plane" if i == 0 else f"{self.env.name}-control-plane{i+1}"
+
+            # Base labels that should always be present
+            labels = {
+                "ingress-ready": "true",
+                "node-role": "control-plane",
+            }
+
+            # Add user-defined labels from config
+            if self.env.nodes.labels:
+                # Check for individual node labels first
+                individual_key = f"control-plane-{i}"
+                if self.env.nodes.labels.individual and individual_key in self.env.nodes.labels.individual:
+                    labels.update(self.env.nodes.labels.individual[individual_key])
+                # Otherwise use global control-plane labels
+                elif self.env.nodes.labels.control_plane:
+                    labels.update(self.env.nodes.labels.control_plane)
+
+            # Apply labels
+            for key, value in labels.items():
+                label_str = f"{key}={value}"
+                try:
+                    self.run_command(["kubectl", "--context", f"kind-{self.env.name}", "label", "node", node_name, label_str, "--overwrite"], capture_output=True)
+                except Exception as e:
+                    console.print(f"[yellow]Warning: Could not apply label {label_str} to {node_name}: {e}[/yellow]")
+
+        # Build label map for worker nodes
+        for i in range(self.env.nodes.workers):
+            # KIND naming: worker, worker2, worker3, ... (first has no number, rest start at 2)
+            node_name = f"{self.env.name}-worker" if i == 0 else f"{self.env.name}-worker{i+1}"
+
+            labels = {
+                "node-role": "worker",
+            }
+
+            # Add user-defined labels from config
+            if self.env.nodes.labels:
+                # Check for individual node labels first
+                individual_key = f"worker-{i}"
+                if self.env.nodes.labels.individual and individual_key in self.env.nodes.labels.individual:
+                    labels.update(self.env.nodes.labels.individual[individual_key])
+                # Otherwise use global worker labels
+                elif self.env.nodes.labels.worker:
+                    labels.update(self.env.nodes.labels.worker)
+
+            # Apply labels
+            for key, value in labels.items():
+                label_str = f"{key}={value}"
+                try:
+                    self.run_command(["kubectl", "--context", f"kind-{self.env.name}", "label", "node", node_name, label_str, "--overwrite"], capture_output=True)
+                except Exception as e:
+                    console.print(f"[yellow]Warning: Could not apply label {label_str} to {node_name}: {e}[/yellow]")
+
+        console.print("✅ Node labels applied")
+
     def create_cluster(self):
         """Create Kind cluster."""
         console.print(f"🔄 Creating cluster '{self.env.name}'...")
@@ -144,6 +206,9 @@ class CommandRunner:
             console.print(f"[bold red]Error creating cluster: {e}[/bold red]")
             raise
         console.print(f"✅ Cluster '{self.env.name}' created")
+
+        # Apply node labels post-creation (KIND overrides kubeadm labels)
+        self._apply_node_labels()
 
     def delete_cluster(self):
         """Delete Kind cluster."""

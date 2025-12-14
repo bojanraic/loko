@@ -258,17 +258,18 @@ class ConfigGenerator:
 
     def generate_configs(self):
         context = self.prepare_context()
-        
+
         # Create directories
         os.makedirs(f"{self.k8s_dir}/config", exist_ok=True)
+        os.makedirs(f"{self.k8s_dir}/config/containerd", exist_ok=True)
         os.makedirs(f"{self.k8s_dir}/certs", exist_ok=True)
         os.makedirs(f"{self.k8s_dir}/logs", exist_ok=True)
         os.makedirs(f"{self.k8s_dir}/storage", exist_ok=True)
-        
+
         # Generate files
         files = {
             'cluster.yaml': 'kind/cluster.yaml.j2',
-            'containerd.yaml': 'containerd/config.yaml.j2',
+            'containerd/hosts.toml': 'containerd/hosts.toml.j2',
             'dnsmasq.conf': 'dnsmasq/config.conf.j2',
             'helmfile.yaml': 'helmfile/helmfile.yaml.j2',
             'traefik-tcp-routes.yaml': 'traefik-tcp-routes.yaml.j2'
@@ -289,7 +290,9 @@ class ConfigGenerator:
 
             template = self.jinja_env.get_template(template_name)
             content = template.render(**context)
-            with open(f"{self.k8s_dir}/config/{filename}", 'w') as f:
+            output_path = f"{self.k8s_dir}/config/{filename}"
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            with open(output_path, 'w') as f:
                 f.write(content)
                 
         return self.k8s_dir

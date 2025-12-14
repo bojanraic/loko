@@ -14,14 +14,6 @@ networking:
   serviceSubnet: "10.11.0.0/16"
   disableDefaultCNI: false
 
-# Containerd (for private container registry)
-containerdConfigPatches:
-- |-
-  [plugins."io.containerd.grpc.v1.cri".registry.mirrors."{{ registry_name }}.{{ local_domain }}"]
-    endpoint = ["https://{{ registry_name }}.{{ local_domain }}"]
-  [plugins."io.containerd.grpc.v1.cri".registry.configs."{{ registry_name }}.{{ local_domain }}".tls]
-    ca_file = "{{ cacert_file }}" 
-
 # Node-specific configuration
 nodes:
 # Control plane nodes
@@ -57,33 +49,22 @@ nodes:
     containerPath: /etc/containerd/certs.d/{{ registry_name }}.{{ local_domain }}
   kubeadmConfigPatches:
   - |
+    apiVersion: kubeadm.k8s.io/v1beta4
     kind: InitConfiguration
     nodeRegistration:
       kubeletExtraArgs:
-        # Node labels
-        node-labels: "ingress-ready=true,kubernetes.io/hostname=control-plane,node-role=control-plane,node-role=master
-        {%- if nodes.get('labels', {}).get('individual', {}).get('control-plane-' + i|string) -%}
-          {%- for key, value in nodes.labels.individual['control-plane-' + i|string].items() -%}
-            ,{{ key }}={{ value }}
-          {%- endfor -%}
-        {%- elif nodes.get('labels', {}).get('control-plane') -%}
-          {%- for key, value in nodes.labels['control-plane'].items() -%}
-            ,{{ key }}={{ value }}
-          {%- endfor -%}
-        {%- endif -%}
-        "
         # Node taints
-        {%- set should_taint = True -%}
-        {%- if nodes.workers == 0 or not nodes.get('internal-components-on-control-plane', False) -%}
-          {%- if nodes.get('allow-scheduling-on-control-plane', False) -%}
-            {%- set should_taint = False -%}
-          {%- endif -%}
-        {%- endif %}
-        {%- if should_taint %}
+        {% set should_taint = True %}
+        {% if nodes.workers == 0 or not nodes.get('internal-components-on-control-plane', False) %}
+          {% if nodes.get('allow-scheduling-on-control-plane', False) %}
+            {% set should_taint = False %}
+          {% endif %}
+        {% endif %}
+        {% if should_taint %}
         register-with-taints: "node-role=control-plane:NoSchedule,node-role=master:NoSchedule"
-        {%- else %}
+        {% else %}
         register-with-taints: ""
-        {%- endif %}
+        {% endif %}
 {% endfor %}
 
 {% if nodes.workers > 0 %}
@@ -104,6 +85,7 @@ nodes:
 {% if nodes.get('labels') or nodes.get('run-services-on-workers-only', False) %}
   kubeadmConfigPatches:
   - |
+    apiVersion: kubeadm.k8s.io/v1beta4
     kind: JoinConfiguration
     nodeRegistration:
       kubeletExtraArgs:
@@ -118,9 +100,9 @@ nodes:
           {%- endfor -%}
         {%- endif -%}
         "
-        {%- if nodes.get('run-services-on-workers-only', False) %}
+        {% if nodes.get('run-services-on-workers-only', False) %}
         register-with-taints: "node-role=worker:NoSchedule"  # Taint worker nodes when run-services-on-workers-only is true
-        {%- endif -%}
+        {% endif %}
 {% endif %}
 {% if not loop.last %}
 

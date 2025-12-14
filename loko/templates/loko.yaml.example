@@ -86,7 +86,7 @@ environment:
     - metrics-server: "3.13.0"
 
     # renovate: datasource=docker depName=registry
-    - registry: "3"
+    - registry: "3.0.0"
 
     # renovate: datasource=docker depName=dockurr/dnsmasq
     - dnsmasq: "2.91"
