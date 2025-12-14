@@ -19,7 +19,7 @@ helmfile = "1.2.2"
 mkcert = "1.4.4"
 
 # YAML/JSON utilities (optional but useful)
-yq = "4.49.2"
+yq = "4.50.1"
 jq = "1.8.1"
 
 [tasks.install]
