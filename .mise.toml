@@ -10,7 +10,7 @@ python = "3.14"
 uv = "latest"
 
 # Kubernetes infrastructure
-kind = "0.30.0"
+kind = "0.31.0"
 kubectl = "1.35.0"
 helm = "4.0.4"
 helmfile = "1.2.2"
