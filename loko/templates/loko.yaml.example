@@ -80,7 +80,7 @@ environment:
     - app-template: "4.5.0"
 
     # renovate: datasource=helm depName=traefik repositoryUrl=https://traefik.github.io/charts
-    - traefik: "38.0.0"
+    - traefik: "38.0.1"
 
     # renovate: datasource=helm depName=metrics-server repositoryUrl=https://kubernetes-sigs.github.io/metrics-server
     - metrics-server: "3.13.0"
