@@ -7,18 +7,21 @@ Check functions (return bool):
 - check_docker_running(runtime) - Verify container runtime daemon is accessible
 - check_config_file(config_path) - Verify config file exists and is readable
 - check_base_dir_writable(base_dir) - Verify base directory is writable
+- check_ports_available(config) - Verify all required ports are available
 
 Ensure functions (exit on failure with helpful error messages):
 - ensure_docker_running(runtime) - Exit if Docker/container runtime not running
 - ensure_config_file(config_path) - Exit if config file missing, suggest solutions
 - ensure_base_dir_writable(base_dir) - Exit if base dir not writable, suggest fixes
 - ensure_single_server_cluster(servers) - Exit if multi-server cluster configured (not yet supported)
+- ensure_ports_available(config) - Exit if any required ports are in use
 
 Used by CLI commands in loko/cli/commands/:
 - ensure_config_file() before commands that read config
 - ensure_docker_running() before commands that use Docker (create, start, stop, etc.)
 - ensure_base_dir_writable() before commands that write to base directory
 - ensure_single_server_cluster() before commands that create/modify clusters
+- ensure_ports_available() before cluster creation to check DNS, LB, and service ports
 
 Example usage:
     @app.command()
@@ -27,11 +30,14 @@ Example usage:
         ensure_docker_running()
         config = get_config(config)
         ensure_single_server_cluster(config.environment.nodes.servers)
+        ensure_ports_available(config)
         # ... rest of implementation
 """
 import os
 import sys
 import subprocess
+import socket
+from typing import Tuple, List, Dict
 from rich.console import Console
 
 console = Console()
@@ -113,4 +119,92 @@ def ensure_single_server_cluster(servers: int):
         console.print(f"\n[yellow]Please update your configuration:[/yellow]")
         console.print(f"[cyan]  nodes:[/cyan]")
         console.print(f"[cyan]    servers: 1[/cyan]")
+        sys.exit(1)
+
+
+def check_ports_available(config) -> Tuple[bool, Dict[str, List[int]]]:
+    """Check if all required ports (DNS, LB, and service ports) are available.
+
+    Returns:
+        Tuple of (all_available, conflicts) where conflicts is a dict mapping
+        port categories to lists of unavailable ports.
+    """
+    from .config import RootConfig
+
+    if not isinstance(config, RootConfig):
+        return True, {}
+
+    env = config.environment
+    conflicts: Dict[str, List[int]] = {}
+
+    # Check DNS port
+    dns_port = env.local_dns_port
+    if _is_port_in_use(dns_port):
+        conflicts.setdefault('dns', []).append(dns_port)
+
+    # Check load balancer ports
+    for port in env.local_lb_ports:
+        if _is_port_in_use(port):
+            conflicts.setdefault('load_balancer', []).append(port)
+
+    # Check enabled service ports
+    enabled_services = (
+        [svc for svc in env.services.system if svc.enabled] +
+        [svc for svc in env.services.user if svc.enabled]
+    )
+
+    for service in enabled_services:
+        if service.ports:
+            for port in service.ports:
+                if _is_port_in_use(port):
+                    conflicts.setdefault('services', []).append(port)
+
+    return len(conflicts) == 0, conflicts
+
+
+def _is_port_in_use(port: int) -> bool:
+    """Check if a port is in use by attempting to bind to it."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(('localhost', port)) == 0
+
+
+def ensure_ports_available(config):
+    """Ensure all required ports are available, exit with error if not."""
+    from .config import RootConfig
+
+    if not isinstance(config, RootConfig):
+        return
+
+    available, conflicts = check_ports_available(config)
+
+    if not available:
+        console.print(f"[bold red]❌ Required ports are already in use[/bold red]")
+        console.print(f"\n[yellow]The following ports must be available before cluster creation:[/yellow]\n")
+
+        if 'dns' in conflicts:
+            console.print(f"[bold cyan]DNS Port:[/bold cyan]")
+            for port in conflicts['dns']:
+                console.print(f"  • Port {port} (DNS service)")
+            console.print(f"[dim]  Common culprits: systemd-resolved, dnsmasq, other DNS servers[/dim]\n")
+
+        if 'load_balancer' in conflicts:
+            console.print(f"[bold cyan]Load Balancer Ports:[/bold cyan]")
+            for port in conflicts['load_balancer']:
+                console.print(f"  • Port {port}")
+            console.print(f"[dim]  These ports are used for ingress traffic routing[/dim]\n")
+
+        if 'services' in conflicts:
+            console.print(f"[bold cyan]Service Ports:[/bold cyan]")
+            for port in conflicts['services']:
+                console.print(f"  • Port {port}")
+            console.print(f"[dim]  These ports are mapped to enabled services[/dim]\n")
+
+        console.print(f"[yellow]Solutions:[/yellow]")
+        console.print(f"[cyan]  1. Stop the services using these ports[/cyan]")
+        console.print(f"[cyan]  2. Disable the conflicting services in your loko.yaml config[/cyan]")
+        console.print(f"[cyan]  3. Change port mappings in your loko.yaml config[/cyan]")
+        console.print(f"\n[yellow]To find what's using a port:[/yellow]")
+        console.print(f"[cyan]  • On macOS: sudo lsof -i :<port>[/cyan]")
+        console.print(f"[cyan]  • On Linux: sudo netstat -tlnp | grep :<port>[/cyan]")
+
         sys.exit(1)

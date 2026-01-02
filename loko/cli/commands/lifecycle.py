@@ -10,7 +10,7 @@ from loko.config import RootConfig
 from loko.utils import load_config, get_dns_container_name, print_environment_summary
 from loko.generator import ConfigGenerator
 from loko.runner import CommandRunner
-from loko.validators import ensure_config_file, ensure_docker_running, ensure_base_dir_writable, ensure_single_server_cluster
+from loko.validators import ensure_config_file, ensure_docker_running, ensure_base_dir_writable, ensure_single_server_cluster, ensure_ports_available
 
 
 console = Console()
@@ -350,6 +350,9 @@ def create(
     # Validate cluster configuration
     ensure_single_server_cluster(config.environment.nodes.servers)
 
+    # Validate port availability before creating any resources
+    ensure_ports_available(config)
+
     console.print(f"[bold green]Creating environment '{config.environment.name}'...[/bold green]")
 
     # Run init first
@@ -374,13 +377,13 @@ def create(
     runner.create_cluster()
     runner.start_dnsmasq()
     runner.inject_dns_nameserver()
-    runner.fetch_kubeconfig()
     runner.wait_for_cluster_ready()
     runner.set_control_plane_scheduling()
     runner.label_nodes()
     runner.list_nodes()
     runner.setup_wildcard_cert()
     runner.deploy_services()
+    runner.configure_services()
     runner.fetch_service_secrets()
 
     # Print environment summary
@@ -416,6 +419,16 @@ def destroy(config_file: str = "loko.yaml") -> None:
 
     # Remove resolver file
     runner.remove_resolver_file()
+
+    # Remove environment directory
+    import shutil
+    env_dir = runner.k8s_dir
+    if os.path.exists(env_dir):
+        console.print(f"🔄 Removing environment directory '{env_dir}'...")
+        shutil.rmtree(env_dir)
+        console.print(f"✅ Environment directory removed")
+    else:
+        console.print(f"ℹ️  Environment directory '{env_dir}' does not exist")
 
     console.print(f"✅ Environment '{cluster_name}' destroyed")
 
@@ -465,7 +478,7 @@ def recreate(
 
     console.print(f"[bold blue]Recreating environment '{config.environment.name}'...[/bold blue]\n")
 
-    # Destroy first
+    # Destroy first (this will free up ports)
     destroy(config_file)
 
     console.print()

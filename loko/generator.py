@@ -113,6 +113,53 @@ class ConfigGenerator:
             return [self._expand_vars(v, env_vars) for v in value]
         return value
 
+    def _manage_git_chart(self, service_name: str, repo_url: str, chart_path: str, version: str) -> str:
+        """
+        Clone a git repo to a temp directory and copy the chart to the cluster config directory.
+        Returns the absolute path to the local chart directory.
+        """
+        import tempfile
+        import shutil
+        
+        target_dir = os.path.join(self.k8s_dir, "charts", service_name)
+        
+        # Always clean up existing directory to ensure fresh copy
+        if os.path.exists(target_dir):
+            shutil.rmtree(target_dir)
+            
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            try:
+                # Clone specific version/tag/branch
+                subprocess.check_call(
+                    ['git', 'clone', '--depth', '1', '--branch', version, repo_url, tmp_dir],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            except subprocess.CalledProcessError:
+                # If branch fails (e.g. might be a commit hash or tag that doesn't work with --branch), 
+                # try full clone and checkout. Or just fail for now. 
+                # Fallback to cloning without branch and checking out
+                 subprocess.check_call(
+                    ['git', 'clone', repo_url, tmp_dir],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                 subprocess.check_call(
+                    ['git', 'checkout', version],
+                    cwd=tmp_dir,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+
+            src_chart_path = os.path.join(tmp_dir, chart_path)
+            if not os.path.exists(src_chart_path):
+                raise ValueError(f"Chart path '{chart_path}' not found in repo '{repo_url}'")
+            
+            # Copy to target directory
+            shutil.copytree(src_chart_path, target_dir)
+            
+        return target_dir
+
     def _process_services(self, services: List[Service], service_ports: Dict[str, int], 
                          service_values_presets: Dict[str, Any], k8s_env_vars: Dict[str, str], 
                          is_system: bool) -> List[Dict[str, Any]]:
@@ -125,6 +172,21 @@ class ConfigGenerator:
             service_dict = service.model_dump(by_alias=True)
             service_name = service.name
             
+            # Handle Git-based charts
+            if service.config.repo and service.config.repo.type == 'git':
+                if not service.config.repo.url:
+                    raise ValueError(f"Git repo URL required for service '{service_name}'")
+                    
+                local_chart_path = self._manage_git_chart(
+                    service_name=service_name,
+                    repo_url=service.config.repo.url,
+                    chart_path=service.config.chart,
+                    version=service.config.version
+                )
+                # Update chart to point to the local absolute path
+                service_dict['config']['chart'] = local_chart_path
+                # We don't need repo ref for local charts in helmfile
+                
             base_values = {}
             
             if is_system and self.env.use_service_presets and service_name in service_values_presets:
@@ -141,7 +203,12 @@ class ConfigGenerator:
                     elif 'primary' in service_values_presets[service_name]:
                         storage_config['primary'] = {'persistence': {'enabled': True, 'size': service.storage['size']}}
                     elif 'persistence' in service_values_presets[service_name]:
-                        storage_config['persistence'] = {'enabled': True, 'size': service.storage['size']}
+                        # Check for sub-keys like 'data' used in Garage
+                        preset_persistence = service_values_presets[service_name]['persistence']
+                        if isinstance(preset_persistence, dict) and 'data' in preset_persistence:
+                            storage_config['persistence'] = {'data': {'size': service.storage['size']}}
+                        else:
+                            storage_config['persistence'] = {'enabled': True, 'size': service.storage['size']}
                     deep_merge(storage_config, base_values)
                 
                 chart_name = service.config.chart
@@ -149,6 +216,9 @@ class ConfigGenerator:
                     auth_config = self._generate_chart_auth_config(service_name, chart_name)
                     if auth_config:
                         deep_merge(auth_config, base_values)
+                
+                # Expand variables in base_values (from presets)
+                base_values = self._expand_vars(base_values, k8s_env_vars)
 
             custom_values = service.config.values or {}
             if custom_values:
@@ -171,6 +241,17 @@ class ConfigGenerator:
         
         # Also collect inline repos from services if any (though our model enforces structure)
         # In our Pydantic model, repo is a ServiceRepoConfig, which might have name/url or ref
+        
+        for service in services:
+             # Access config from the dict structure since services here are dicts dump from loaded model
+             # But 'config' key exists and 'repo' might be a dict
+             # Warning: 'services' passed here is List[Dict], so we access as dict
+             if 'config' in service and 'repo' in service['config']:
+                 repo = service['config']['repo']
+                 if repo and repo.get('type') == 'git':
+                     continue
+                 if repo and repo.get('name') and repo.get('url'):
+                     repositories[repo['name']] = repo['url']
         
         return repositories
 
@@ -224,7 +305,7 @@ class ConfigGenerator:
             'helm_repositories': helm_repositories,
             'registry': self.env.registry.model_dump(by_alias=True, exclude_none=True),
             'registry_name': self.env.registry.name,
-            'registry_version': get_internal_component('registry'),
+            'zot_version': get_internal_component('zot'),
             'app_template_version': get_internal_component('app-template'),
             'traefik_version': get_internal_component('traefik'),
             'metrics_server_version': get_internal_component('metrics-server'),
@@ -266,10 +347,9 @@ class ConfigGenerator:
         os.makedirs(f"{self.k8s_dir}/logs", exist_ok=True)
         os.makedirs(f"{self.k8s_dir}/storage", exist_ok=True)
 
-        # Generate files
+        # Generate non-containerd files
         files = {
             'cluster.yaml': 'kind/cluster.yaml.j2',
-            'containerd/hosts.toml': 'containerd/hosts.toml.j2',
             'dnsmasq.conf': 'dnsmasq/config.conf.j2',
             'helmfile.yaml': 'helmfile/helmfile.yaml.j2',
             'traefik-tcp-routes.yaml': 'traefik-tcp-routes.yaml.j2'
@@ -294,5 +374,52 @@ class ConfigGenerator:
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
             with open(output_path, 'w') as f:
                 f.write(content)
+
+        # Generate containerd hosts.toml files
+        containerd_template = self.jinja_env.get_template('containerd/hosts.toml.j2')
+        registry_host = f"{self.env.registry.name}.{self.env.local_domain}"
+        
+        # Local registry config
+        local_reg_ctx = context.copy()
+        local_reg_ctx.update({
+            'hostname': registry_host,
+            'upstream_hostname': registry_host,
+            'registry_host': registry_host,
+            'is_local_registry': True,
+            'mirror_prefix': ''
+        })
+        self._write_containerd_config(registry_host, containerd_template.render(**local_reg_ctx))
+
+        # Mirroring configs
+        if self.env.registry.mirroring.enabled:
+            mirrors = []
+            if self.env.registry.mirroring.docker_hub:
+                mirrors.append(('docker.io', 'registry-1.docker.io', '/dockerhub'))
+            if self.env.registry.mirroring.quay:
+                mirrors.append(('quay.io', 'quay.io', '/quay'))
+            if self.env.registry.mirroring.ghcr:
+                mirrors.append(('ghcr.io', 'ghcr.io', '/ghcr'))
+            if self.env.registry.mirroring.k8s_registry:
+                mirrors.append(('k8s.gcr.io', 'k8s.gcr.io', '/k8s'))
+                mirrors.append(('registry.k8s.io', 'registry.k8s.io', '/k8s'))
+            if self.env.registry.mirroring.mcr:
+                mirrors.append(('mcr.microsoft.com', 'mcr.microsoft.com', '/mcr'))
+
+            for hostname, upstream, prefix in mirrors:
+                mirror_ctx = context.copy()
+                mirror_ctx.update({
+                    'hostname': hostname,
+                    'upstream_hostname': upstream,
+                    'registry_host': registry_host,
+                    'is_local_registry': False,
+                    'mirror_prefix': prefix
+                })
+                self._write_containerd_config(hostname, containerd_template.render(**mirror_ctx))
                 
         return self.k8s_dir
+
+    def _write_containerd_config(self, hostname: str, content: str):
+        output_path = f"{self.k8s_dir}/config/containerd/{hostname}/hosts.toml"
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        with open(output_path, 'w') as f:
+            f.write(content)

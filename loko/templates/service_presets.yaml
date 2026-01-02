@@ -6,6 +6,7 @@ service_ports:
   mongodb: 27017
   rabbitmq: 5672
   valkey: 6379
+  garage: 3900
 
 # Default values for services
 # Used to configure helm charts with consistent naming and persistence configuration
@@ -40,3 +41,13 @@ service_values_presets:
     nameOverride: rabbitmq
     storage:
       requestedSize: null  # Set from service.storage.size
+
+  garage:
+    fullNameOverride: garage
+    nameOverride: garage
+    persistence:
+      enabled: true
+      data:
+        size: null # set from service.storage.size
+      meta:
+        size: 500Mi # Fixed size for metadata

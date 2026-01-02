@@ -282,3 +282,31 @@ def test_to_yaml_filter(sample_config):
 
     assert "key: value" in yaml_output
     assert "nested:" in yaml_output
+
+def test_generate_mirroring_configs(sample_config, temp_dir):
+    """Test that multiple hosts.toml files are generated when mirroring is enabled."""
+    sample_config.environment.registry.mirroring.enabled = True
+    sample_config.environment.registry.mirroring.docker_hub = True
+    sample_config.environment.local_domain = "loko.local"
+    sample_config.environment.registry.name = "registry"
+    
+    # Use a real ConfigGenerator but mock the file writing if needed, 
+    # or just let it write to temp_dir
+    generator = ConfigGenerator(sample_config, "config.yaml")
+    generator.k8s_dir = temp_dir
+    
+    # We need to ensure the templates are picked up correctly
+    generator.generate_configs()
+    
+    containerd_dir = Path(temp_dir) / "config" / "containerd"
+    assert containerd_dir.exists()
+    
+    # Local registry
+    assert (containerd_dir / "registry.loko.local" / "hosts.toml").exists()
+    
+    # Docker Hub mirror
+    assert (containerd_dir / "docker.io" / "hosts.toml").exists()
+    with open(containerd_dir / "docker.io" / "hosts.toml") as f:
+        content = f.read()
+        assert 'server = "https://registry-1.docker.io"' in content
+        assert 'host."https://registry.loko.local/v2/dockerhub"' in content

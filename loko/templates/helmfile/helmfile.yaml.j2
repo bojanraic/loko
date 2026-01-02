@@ -1,16 +1,15 @@
 helmDefaults:
   createNamespace: true
   wait: true
+  timeout: 900
   atomic: true
-  timeout: 600
-
 # Dynamic repositories from services configuration
 repositories:
   # Core repositories for internal components
   - name: traefik
     url: https://traefik.github.io/charts
-  - name: bjw-s-labs
-    url: https://bjw-s-labs.github.io/helm-charts/
+  - name: zot
+    url: http://zotregistry.dev/helm-charts
   {% if deploy_metrics_server %}
   - name: metrics-server
     url: https://kubernetes-sigs.github.io/metrics-server/
@@ -25,6 +24,8 @@ repositories:
 releases:
   # Traefik Ingress Controller
   - name: traefik
+    labels:
+      name: traefik
     chart: traefik/traefik
     namespace: traefik
     version: {{ traefik_version }}
@@ -112,9 +113,14 @@ releases:
   {% if deploy_metrics_server %}
   # Metrics Server
   - name: metrics-server
+    labels:
+      name: metrics-server
     chart: metrics-server/metrics-server
     namespace: kube-system
     version: {{ metrics_server_version }}
+    needs:
+      - traefik/traefik
+      - registry/registry
     values:
       - args:
           - --kubelet-insecure-tls
@@ -140,81 +146,165 @@ releases:
         {% endif %}
   {% endif %}
 
-  # Registry
+  # Registry (Zot)
   - name: registry
+    labels:
+      name: registry
     namespace: registry
-    chart: bjw-s-labs/app-template
-    version: {{ app_template_version }}
+    chart: zot/zot
+    version: {{ zot_version }}
     needs:
       - traefik/traefik
     values:
-      - controllers:
-          registry:
-            type: statefulset
-            {% if nodes.get('internal-components-on-control-plane', true) %}
-            # Schedule on control plane for access to port mappings
-            pod:
-              nodeSelector:
-                ingress-ready: "true"
-              tolerations:
-                - key: "node-role"
-                  operator: "Equal"
-                  value: "control-plane"
-                  effect: "NoSchedule"
-                - key: "node-role"
-                  operator: "Equal"
-                  value: "master"
-                  effect: "NoSchedule"
-                - key: node-role.kubernetes.io/control-plane
-                  operator: Exists
-                  effect: NoSchedule
-                - key: node-role.kubernetes.io/master
-                  operator: Exists
-                  effect: NoSchedule
-            {% endif %}
-            containers:
-              app:
-                image:
-                  repository: registry
-                  tag: {{ registry_version }}
+      - replicaCount: 1
+
+        # Persistence configuration
+        persistence: true
+        pvc:
+          create: true
+          name: null  # Auto-generate name
+          accessModes: ["ReadWriteOnce"]
+          storage: {{ registry.storage.size }}
+
+        # Service configuration
         service:
-          app:
-            controller: registry
-            ports:
-              http:
-                port: 5000
+          type: ClusterIP
+          port: 5000
+
+        # Ingress configuration
         ingress:
-          app:
-            className: traefik
-            annotations:
-              traefik.ingress.kubernetes.io/router.entrypoints: websecure
-              traefik.ingress.kubernetes.io/router.tls: "true"
-            hosts:
-              - host: {{ registry_name }}.{{ local_domain }}
-                paths:
-                  - path: /
-                    service:
-                      identifier: app
-                      port: http
-            tls:
-              - hosts:
-                - {{ registry_name }}.{{ local_domain }}        
-        persistence:
-          data:
-            enabled: true
-            size: {{ registry.storage.size }}
-            retain: true
-            type: persistentVolumeClaim
-            accessMode: ReadWriteOnce
-            globalMounts:
-              - path: /var/lib/registry
-        env:
-          REGISTRY_HTTP_ADDR: ":5000"
-          REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: /var/lib/registry
+          enabled: true
+          className: "traefik"
+          pathtype: ImplementationSpecific
+          annotations:
+            traefik.ingress.kubernetes.io/router.entrypoints: websecure
+            traefik.ingress.kubernetes.io/router.tls: "true"
+          hosts:
+            - host: {{ registry_name }}.{{ local_domain }}
+              paths:
+                - path: /
+          tls:
+            - hosts:
+              - {{ registry_name }}.{{ local_domain }}
+
+        # Zot configuration
+        mountConfig: true
+        configFiles:
+          config.json: |-
+            {
+              "storage": {
+                "rootDirectory": "/var/lib/registry",
+                "dedupe": true,
+                "gc": true
+              },
+              "http": {
+                "address": "0.0.0.0",
+                "port": "5000",
+                "compat": ["docker2s2"]
+              },
+              "log": {
+                "level": "info"
+              },
+              "extensions": {
+                "sync": {
+                  "enable": {{ registry.mirroring.enabled | lower }},
+                  "registries": [
+                    {% if registry.mirroring.docker_hub %}
+                    {
+                      "urls": ["https://registry-1.docker.io"],
+                      "onDemand": true,
+                      "tlsVerify": true,
+                      "content": [
+                        {
+                          "prefix": "**",
+                          "destination": "/dockerhub"
+                        }
+                      ]
+                    }{% if registry.mirroring.quay or registry.mirroring.ghcr or registry.mirroring.k8s_registry or registry.mirroring.mcr %},{% endif %}
+                    {% endif %}
+                    {% if registry.mirroring.quay %}
+                    {
+                      "urls": ["https://quay.io"],
+                      "onDemand": true,
+                      "tlsVerify": true,
+                      "content": [
+                        {
+                          "prefix": "**",
+                          "destination": "/quay"
+                        }
+                      ]
+                    }{% if registry.mirroring.ghcr or registry.mirroring.k8s_registry or registry.mirroring.mcr %},{% endif %}
+                    {% endif %}
+                    {% if registry.mirroring.ghcr %}
+                    {
+                      "urls": ["https://ghcr.io"],
+                      "onDemand": true,
+                      "tlsVerify": true,
+                      "content": [
+                        {
+                          "prefix": "**",
+                          "destination": "/ghcr"
+                        }
+                      ]
+                    }{% if registry.mirroring.k8s_registry or registry.mirroring.mcr %},{% endif %}
+                    {% endif %}
+                    {% if registry.mirroring.k8s_registry %}
+                    {
+                      "urls": ["https://k8s.gcr.io", "https://registry.k8s.io"],
+                      "onDemand": true,
+                      "tlsVerify": true,
+                      "content": [
+                        {
+                          "prefix": "**",
+                          "destination": "/k8s"
+                        }
+                      ]
+                    }{% if registry.mirroring.mcr %},{% endif %}
+                    {% endif %}
+                    {% if registry.mirroring.mcr %}
+                    {
+                      "urls": ["https://mcr.microsoft.com"],
+                      "onDemand": true,
+                      "tlsVerify": true,
+                      "content": [
+                        {
+                          "prefix": "**",
+                          "destination": "/mcr"
+                        }
+                      ]
+                    }
+                    {% endif %}
+                  ]
+                }
+              }
+            }
+
+        # Node scheduling (control plane placement)
+        {% if nodes.get('internal-components-on-control-plane', true) %}
+        nodeSelector:
+          ingress-ready: "true"
+        tolerations:
+          - key: "node-role"
+            operator: "Equal"
+            value: "control-plane"
+            effect: "NoSchedule"
+          - key: "node-role"
+            operator: "Equal"
+            value: "master"
+            effect: "NoSchedule"
+          - key: node-role.kubernetes.io/control-plane
+            operator: Exists
+            effect: NoSchedule
+          - key: node-role.kubernetes.io/master
+            operator: Exists
+            effect: NoSchedule
+        {% endif %}
 
   # System service releases (with presets and port management)
   {% for service in system_services if service.enabled %}
   - name: {{ service.name }}
+    labels:
+      name: {{ service.name }}
     namespace: {{ service.namespace | default(service.name) }}
     chart: {{ service.config.chart }}
     version: {{ service.config.version }}
@@ -242,11 +332,14 @@ releases:
   # User service releases (without presets - user provides ports and complete values)
   {% for service in user_services if service.enabled %}
   - name: {{ service.name }}
+    labels:
+      name: {{ service.name }}
     namespace: {{ service.namespace | default(service.name) }}
     chart: {{ service.config.chart }}
     version: {{ service.config.version }}
     needs:
       - traefik/traefik
+      - registry/registry
     values:
       - {{ service.base_values | to_yaml | indent(8) | trim }}
       {% if run_services_on_workers_only and nodes.workers > 0 %}
