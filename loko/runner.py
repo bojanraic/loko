@@ -16,6 +16,12 @@ class CommandRunner:
         self.env = config.environment
         self.runtime = self.env.provider.runtime
         self.k8s_dir = os.path.join(os.path.expandvars(self.env.base_dir), self.env.name)
+        self.kubeconfig = os.path.join(self.k8s_dir, "kubeconfig")
+
+    @property
+    def secrets_path(self) -> str:
+        """Return the path to the service secrets file."""
+        return os.path.join(self.k8s_dir, 'service-secrets.txt')
 
     def run_command(self, command: List[str], check: bool = True, capture_output: bool = False) -> subprocess.CompletedProcess:
         """Run a shell command."""
@@ -81,6 +87,15 @@ class CommandRunner:
             domains = [f"*.{self.env.local_domain}", self.env.local_domain]
             if self.env.use_apps_subdomain:
                 domains.append(f"*.{self.env.apps_subdomain}.{self.env.local_domain}")
+            
+            # Add Garage-specific wildcard domains if Garage is enabled
+            garage_enabled = False
+            if self.env.services.system:
+                garage_enabled = any(svc.name == "garage" and svc.enabled for svc in self.env.services.system)
+            
+            if garage_enabled:
+                domains.append(f"*.garage.{self.env.local_domain}")
+                domains.append(f"*.s3.{self.env.local_domain}")
                 
             cmd = ["mkcert", "-cert-file", cert_file, "-key-file", key_file] + domains
             self.run_command(cmd)
@@ -155,7 +170,7 @@ class CommandRunner:
             for key, value in labels.items():
                 label_str = f"{key}={value}"
                 try:
-                    self.run_command(["kubectl", "--context", f"kind-{self.env.name}", "label", "node", node_name, label_str, "--overwrite"], capture_output=True)
+                    self.run_command(["kubectl", "--kubeconfig", self.kubeconfig, "label", "node", node_name, label_str, "--overwrite"], capture_output=True)
                 except Exception as e:
                     console.print(f"[yellow]Warning: Could not apply label {label_str} to {node_name}: {e}[/yellow]")
 
@@ -182,7 +197,7 @@ class CommandRunner:
             for key, value in labels.items():
                 label_str = f"{key}={value}"
                 try:
-                    self.run_command(["kubectl", "--context", f"kind-{self.env.name}", "label", "node", node_name, label_str, "--overwrite"], capture_output=True)
+                    self.run_command(["kubectl", "--kubeconfig", self.kubeconfig, "label", "node", node_name, label_str, "--overwrite"], capture_output=True)
                 except Exception as e:
                     console.print(f"[yellow]Warning: Could not apply label {label_str} to {node_name}: {e}[/yellow]")
 
@@ -207,6 +222,9 @@ class CommandRunner:
             raise
         console.print(f"✅ Cluster '{self.env.name}' created")
 
+        # Fetch kubeconfig immediately after creation so we can use kubectl
+        self.fetch_kubeconfig()
+
         # Apply node labels post-creation (KIND overrides kubeadm labels)
         self._apply_node_labels()
 
@@ -220,9 +238,13 @@ class CommandRunner:
         self.run_command(["kind", "delete", "cluster", "--name", self.env.name])
         console.print(f"✅ Cluster '{self.env.name}' deleted")
 
-    def deploy_services(self):
+    def deploy_services(self, service_names: Optional[List[str]] = None):
         """Deploy services using helmfile."""
-        console.print("🔄 Deploying services...")
+        if service_names:
+            console.print(f"🔄 Deploying services: {', '.join(service_names)}...")
+        else:
+            console.print("🔄 Deploying all services...")
+            
         helmfile_config = os.path.join(self.k8s_dir, "config", "helmfile.yaml")
 
         # Prepare environment variables for helmfile
@@ -243,7 +265,7 @@ class CommandRunner:
             'LOCAL_APPS_DOMAIN': local_apps_domain,
         })
 
-        # Add and update helm repositories first to ensure we have the latest chart versions
+        # Add and update helm repositories first
         console.print("🔄 Adding helm repositories...")
         repos_cmd = [
             "helmfile",
@@ -263,7 +285,7 @@ class CommandRunner:
         except subprocess.CalledProcessError as e:
             console.print(f"[yellow]⚠️  Warning: Could not add repositories: {e.stderr}[/yellow]")
 
-        # Update all helm repositories to fetch latest chart indexes
+        # Update all helm repositories
         console.print("🔄 Updating helm repository indexes...")
         update_cmd = ["helm", "repo", "update"]
 
@@ -283,8 +305,13 @@ class CommandRunner:
             "helmfile",
             "--kube-context", f"kind-{self.env.name}",
             "--file", helmfile_config,
-            "sync"
         ]
+        
+        if service_names:
+            for name in service_names:
+                cmd.extend(["--selector", f"name={name}"])
+
+        cmd.append("sync")
         
         # Run with updated environment
         try:
@@ -299,17 +326,182 @@ class CommandRunner:
             console.print(f"[bold red]Error running helmfile: {e}[/bold red]")
             raise
 
-        console.print("✅ Services deployed")
+        if service_names:
+            console.print(f"✅ Services deployed: {', '.join(service_names)}")
+        else:
+            console.print("✅ Services deployed")
 
         # Deploy TCP routes for system services
-        self.deploy_tcp_routes()
+        self.deploy_tcp_routes(service_names)
 
-    def deploy_tcp_routes(self):
+    def destroy_services(self, service_names: Optional[List[str]] = None):
+        """Destroy services using helmfile."""
+        if service_names:
+            console.print(f"🔄 Undeploying services: {', '.join(service_names)}...")
+        else:
+            console.print("🔄 Undeploying all services...")
+
+        helmfile_config = os.path.join(self.k8s_dir, "config", "helmfile.yaml")
+
+        # Prepare environment variables for helmfile
+        env = os.environ.copy()
+        apps_subdomain = self.env.apps_subdomain
+        local_apps_domain = f"{apps_subdomain}.{self.env.local_domain}" if self.env.use_apps_subdomain else self.env.local_domain
+
+        env.update({
+            'ENV_NAME': self.env.name,
+            'LOCAL_DOMAIN': self.env.local_domain,
+            'LOCAL_IP': self.env.local_ip,
+            'REGISTRY_NAME': self.env.registry.name,
+            'REGISTRY_HOST': f"{self.env.registry.name}.{self.env.local_domain}",
+            'APPS_SUBDOMAIN': apps_subdomain,
+            'USE_APPS_SUBDOMAIN': str(self.env.use_apps_subdomain).lower(),
+            'LOCAL_APPS_DOMAIN': local_apps_domain,
+        })
+
+        cmd = [
+            "helmfile",
+            "--kube-context", f"kind-{self.env.name}",
+            "--file", helmfile_config,
+        ]
+
+        if service_names:
+            for name in service_names:
+                cmd.extend(["--selector", f"name={name}"])
+
+        cmd.append("destroy")
+
+        try:
+            subprocess.run(
+                cmd,
+                check=True,
+                capture_output=False,
+                text=True,
+                env=env
+            )
+        except subprocess.CalledProcessError as e:
+            console.print(f"[bold red]Error running helmfile destroy: {e}[/bold red]")
+            raise
+
+        # Remove secrets for undeployed services
+        if service_names:
+            self.remove_service_secrets(service_names)
+            console.print(f"✅ Services undeployed: {', '.join(service_names)}")
+        else:
+            # If destroying all services, we could remove the entire secrets file
+            # but let's be conservative and only remove when specific services are given
+            console.print("✅ Services undeployed")
+
+    def get_all_services(self) -> List[dict]:
+        """Get all enabled services (system and user)."""
+        all_services = []
+        
+        # Add internal components (traefik, metrics-server, registry)
+        all_services.append({"name": "traefik", "type": "internal", "enabled": True})
+        if self.env.enable_metrics_server:
+            all_services.append({"name": "metrics-server", "type": "internal", "enabled": True})
+        all_services.append({"name": "registry", "type": "internal", "enabled": True})
+
+        # Add system services
+        if self.env.services.system:
+            for svc in self.env.services.system:
+                all_services.append({
+                    "name": svc.name,
+                    "type": "system",
+                    "enabled": svc.enabled,
+                    "namespace": svc.namespace or svc.name
+                })
+
+        # Add user services
+        if self.env.services.user:
+            for svc in self.env.services.user:
+                all_services.append({
+                    "name": svc.name,
+                    "type": "user",
+                    "enabled": svc.enabled,
+                    "namespace": svc.namespace or svc.name
+                })
+        
+        return all_services
+
+    def get_services_status(self) -> List[dict]:
+        """Get status of all enabled services."""
+        services = self.get_all_services()
+        enabled_services = [s for s in services if s['enabled']]
+
+        try:
+            # Get helm releases status
+            result = self.run_command(
+                ["helm", "--kubeconfig", self.kubeconfig, "list", "--all-namespaces", "-o", "json"],
+                capture_output=True,
+                check=False
+            )
+            
+            import json
+            releases = []
+            if result.returncode == 0 and result.stdout.strip():
+                releases = json.loads(result.stdout)
+            
+            # Get pods status
+            pods_result = self.run_command(
+                ["kubectl", "--kubeconfig", self.kubeconfig, "get", "pods", "-A", "-o", "json"],
+                capture_output=True,
+                check=False
+            )
+            
+            pods = []
+            if pods_result.returncode == 0 and pods_result.stdout.strip():
+                pods_data = json.loads(pods_result.stdout)
+                pods = pods_data.get('items', [])
+
+            status_list = []
+            for svc in enabled_services:
+                # Find release info
+                release = next((r for r in releases if r['name'] == svc['name']), None)
+                
+                # Find pod info (rough check by label or name)
+                namespace = svc.get('namespace', svc['name'])
+                if svc['name'] == 'metrics-server':
+                    namespace = 'kube-system'
+                
+                svc_pods = [p for p in pods if p['metadata']['namespace'] == namespace]
+                
+                pod_status = "Unknown"
+                if svc_pods:
+                    ready_pods = sum(1 for p in svc_pods if all(c.get('ready', False) for c in p.get('status', {}).get('containerStatuses', [])))
+                    total_pods = len(svc_pods)
+                    pod_status = f"{ready_pods}/{total_pods} Ready"
+                elif release:
+                    pod_status = "No pods"
+                
+                status_list.append({
+                    "name": svc['name'],
+                    "type": svc['type'],
+                    "namespace": namespace,
+                    "installed": release is not None,
+                    "status": release['status'] if release else "Not installed",
+                    "pods": pod_status,
+                    "chart": release['chart'] if release else "N/A",
+                    "version": release['app_version'] if release else "N/A"
+                })
+            
+            return status_list
+
+        except Exception as e:
+            console.print(f"[yellow]⚠️  Could not get services status: {e}[/yellow]")
+            return []
+
+    def deploy_tcp_routes(self, service_names: Optional[List[str]] = None):
         """Deploy Traefik TCP routes for system services."""
         tcp_routes_file = os.path.join(self.k8s_dir, "config", "traefik-tcp-routes.yaml")
-
         if not os.path.exists(tcp_routes_file):
             return
+        # If specific services are provided, check if any of them are system services with ports
+        # This prevents triggering TCP route deployment for unrelated user services
+        if service_names:
+            system_service_names = {svc.name for svc in self.env.services.system if svc.enabled and svc.ports}
+            if not any(name in system_service_names for name in service_names):
+                return
 
         # Check if there's content to apply (file might be empty if no services have ports)
         with open(tcp_routes_file, 'r') as f:
@@ -321,15 +513,13 @@ class CommandRunner:
         )
 
         if not has_manifest_content:
-            console.print("ℹ️  No TCP routes to deploy")
             return
 
         console.print("🔄 Deploying Traefik TCP routes...")
 
         try:
             result = self.run_command([
-                "kubectl",
-                "--context", f"kind-{self.env.name}",
+                "kubectl", "--kubeconfig", self.kubeconfig,
                 "apply", "-f", tcp_routes_file
             ], capture_output=True)
 
@@ -358,6 +548,12 @@ class CommandRunner:
             console.print(f"[yellow]ℹ️  CI environment detected, overriding DNS port to {dns_port}[/yellow]")
         elif self.env.local_dns_port != 53:
             console.print(f"ℹ️  Using configured custom DNS port: {dns_port}")
+
+        # Remove any existing container with the same name
+        existing = self.list_containers(name_filter=container_name, all_containers=True, quiet=True, check=False)
+        if existing:
+            console.print(f"  🔄 Removing existing DNS container...")
+            self.run_command([self.runtime, "rm", "-f", container_name], check=False)
 
         # Check if port is available
         if is_port_in_use(int(dns_port)):
@@ -617,26 +813,35 @@ Domains=~{self.env.local_domain}
         """Fetch kubeconfig from kind cluster."""
         console.print("🔄 Fetching kubeconfig...")
         
+        # Ensure the directory for kubeconfig exists
+        os.makedirs(os.path.dirname(self.kubeconfig), exist_ok=True)
+        
         try:
             expected_context = f"kind-{self.env.name}"
             
             # Explicitly export kubeconfig to ensure context exists
-            # This merges into default ~/.kube/config
+            # This merges into default ~/.kube/config AND saves to local file
+            self.run_command(
+                ["kind", "export", "kubeconfig", "--name", self.env.name, "--kubeconfig", self.kubeconfig],
+                capture_output=True
+            )
+            
+            # Also export to default to be safe for other tools
             self.run_command(
                 ["kind", "export", "kubeconfig", "--name", self.env.name],
                 capture_output=True
             )
             
-            # Switch to the kind context
+            # Switch to the kind context in the local kubeconfig
             self.run_command(
-                ["kubectl", "config", "use-context", expected_context],
+                ["kubectl", "--kubeconfig", self.kubeconfig, "config", "use-context", expected_context],
                 capture_output=True,
                 check=False
             )
             
             # Verify it worked
             result = self.run_command(
-                ["kubectl", "config", "current-context"],
+                ["kubectl", "--kubeconfig", self.kubeconfig, "config", "current-context"],
                 capture_output=True,
                 check=False
             )
@@ -652,30 +857,43 @@ Domains=~{self.env.local_domain}
     def wait_for_cluster_ready(self, timeout: int = 120):
         """Wait for cluster to be ready."""
         console.print("🔄 Waiting for cluster to be ready...")
-        
+
         import time
         start_time = time.time()
-        
+        last_error = None
+        attempt = 0
+
         while time.time() - start_time < timeout:
+            attempt += 1
+            elapsed = int(time.time() - start_time)
+
             try:
                 result = self.run_command(
-                ["kubectl", "--context", f"kind-{self.env.name}", "get", "nodes", "-o", "jsonpath={.items[*].status.conditions[?(@.type=='Ready')].status}"],
-                capture_output=True,
-                check=False
-            )
-                
+                    ["kubectl", "--kubeconfig", self.kubeconfig, "get", "nodes", "-o", "jsonpath={.items[*].status.conditions[?(@.type=='Ready')].status}"],
+                    capture_output=True,
+                    check=False
+                )
+
                 # Check if all nodes are Ready
                 statuses = result.stdout.strip().split()
                 if statuses and all(s == "True" for s in statuses):
                     console.print("✅ Cluster is ready")
                     return
-                    
-            except Exception:
-                pass
-            
+                elif result.returncode != 0 and result.stdout:
+                    # API is responding but nodes aren't ready
+                    console.print(f"  ⏳ Nodes not ready yet ({elapsed}s)... statuses: {statuses if statuses else 'none'}")
+
+            except Exception as e:
+                last_error = str(e)
+                if attempt % 3 == 0:  # Log every 3rd attempt (every ~15 seconds)
+                    console.print(f"  ⏳ Waiting for API server ({elapsed}s)...")
+
             time.sleep(5)
-        
-        console.print("[yellow]⚠️  Cluster readiness check timed out[/yellow]")
+
+        if last_error:
+            console.print(f"[yellow]⚠️  Cluster readiness check timed out (last error: {last_error})[/yellow]")
+        else:
+            console.print(f"[yellow]⚠️  Cluster readiness check timed out after {timeout}s[/yellow]")
 
     def list_nodes(self):
         """List cluster nodes."""
@@ -683,7 +901,7 @@ Domains=~{self.env.local_domain}
         
         try:
             result = self.run_command(
-                ["kubectl", "get", "nodes", "-o", "wide"],
+                ["kubectl", "--kubeconfig", self.kubeconfig, "get", "nodes", "-o", "wide"],
                 capture_output=True
             )
             console.print(result.stdout)
@@ -698,7 +916,7 @@ Domains=~{self.env.local_domain}
             if self.env.nodes.allow_scheduling_on_control_plane:
                 # Remove NoSchedule taint from control plane nodes
                 result = self.run_command(
-                    ["kubectl", "taint", "nodes", "--all", "node-role.kubernetes.io/control-plane-"],
+                    ["kubectl", "--kubeconfig", self.kubeconfig, "taint", "nodes", "--all", "node-role.kubernetes.io/control-plane-"],
                     capture_output=True,
                     check=False
                 )
@@ -722,7 +940,7 @@ Domains=~{self.env.local_domain}
         try:
             # Get worker nodes (nodes without control-plane role)
             result = self.run_command(
-                ["kubectl", "get", "nodes", "-l", "!node-role.kubernetes.io/control-plane", "-o", "name"],
+                ["kubectl", "--kubeconfig", self.kubeconfig, "get", "nodes", "-l", "!node-role.kubernetes.io/control-plane", "-o", "name"],
                 capture_output=True,
                 check=False
             )
@@ -735,7 +953,7 @@ Domains=~{self.env.local_domain}
             
             for node in worker_nodes:
                 self.run_command(
-                    ["kubectl", "label", node, "node-role.kubernetes.io/worker=true", "--overwrite"],
+                    ["kubectl", "--kubeconfig", self.kubeconfig, "label", node, "node-role.kubernetes.io/worker=true", "--overwrite"],
                     capture_output=True,
                     check=False
                 )
@@ -759,7 +977,7 @@ Domains=~{self.env.local_domain}
                 return
             
             # Ensure traefik namespace exists
-            self.run_command(["kubectl", "create", "namespace", "traefik"], capture_output=True, check=False)
+            self.run_command(["kubectl", "--kubeconfig", self.kubeconfig, "create", "namespace", "traefik"], capture_output=True, check=False)
 
             # Create tls secret in traefik namespace (where Traefik expects it)
             # Name must be wildcard-tls as per helmfile config
@@ -768,7 +986,7 @@ Domains=~{self.env.local_domain}
             
             # Check if secret exists
             check = self.run_command(
-                ["kubectl", "get", "secret", secret_name, "-n", namespace],
+                ["kubectl", "--kubeconfig", self.kubeconfig, "get", "secret", secret_name, "-n", namespace],
                 capture_output=True,
                 check=False
             )
@@ -779,7 +997,7 @@ Domains=~{self.env.local_domain}
 
             # Create the secret
             result = self.run_command([
-                "kubectl", "create", "secret", "tls", secret_name,
+                "kubectl", "--kubeconfig", self.kubeconfig, "create", "secret", "tls", secret_name,
                 f"--cert={cert_file}",
                 f"--key={key_file}",
                 f"--namespace={namespace}"
@@ -793,7 +1011,90 @@ Domains=~{self.env.local_domain}
         except Exception as e:
             console.print(f"[yellow]⚠️  Could not setup wildcard certificate: {e}[/yellow]")
 
-    def fetch_service_secrets(self):
+    def _parse_secrets_file(self) -> dict:
+        """Parse the secrets file into a dictionary of service entries."""
+        secrets_file = self.secrets_path
+        if not os.path.exists(secrets_file):
+            return {}
+
+        with open(secrets_file, 'r') as f:
+            content = f.read()
+
+        # Remove header (lines starting with #)
+        lines = content.split('\n')
+        content_without_header = []
+        for line in lines:
+            if line.strip() and not line.strip().startswith('#'):
+                content_without_header.append(line)
+            elif not line.strip().startswith('#'):
+                # Keep blank lines that aren't part of header
+                content_without_header.append(line)
+
+        content = '\n'.join(content_without_header)
+
+        # Split by delimiter
+        sections = content.split('\n---\n')
+        services = {}
+
+        for section in sections:
+            section = section.strip()
+            if not section:
+                continue
+
+            # Extract service name from the section
+            lines = section.split('\n')
+            service_name = None
+            for line in lines:
+                line_stripped = line.strip()
+                if line_stripped.startswith('Service:'):
+                    service_name = line_stripped.split(':', 1)[1].strip()
+                    break
+
+            if service_name:
+                services[service_name] = section
+
+        return services
+
+    def _write_secrets_file(self, services: dict):
+        """Write services dictionary back to secrets file with clean structure."""
+        secrets_file = self.secrets_path
+
+        with open(secrets_file, 'w') as f:
+            f.write(f"# Service Credentials for {self.env.name}\n")
+            f.write(f"# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"\n")
+
+            # Sort services alphabetically for consistent output
+            for i, service_name in enumerate(sorted(services.keys())):
+                f.write(services[service_name])
+                # Add delimiter between services, but not after the last one
+                if i < len(services) - 1:
+                    f.write(f"\n---\n")
+                else:
+                    f.write(f"\n")
+
+    def remove_service_secrets(self, service_names: List[str]):
+        """Remove secrets for specified services from the secrets file."""
+        if not service_names:
+            return
+
+        services = self._parse_secrets_file()
+        removed_any = False
+
+        for service_name in service_names:
+            if service_name in services:
+                del services[service_name]
+                removed_any = True
+
+        if removed_any:
+            if services:
+                self._write_secrets_file(services)
+            else:
+                # If no services left, remove the file
+                if os.path.exists(self.secrets_path):
+                    os.remove(self.secrets_path)
+
+    def fetch_service_secrets(self, service_names: Optional[List[str]] = None):
         """Fetch and extract service credentials to a file."""
         service_configs = {
             'mysql': ('root', 'settings.rootPassword.value'),
@@ -804,10 +1105,16 @@ Domains=~{self.env.local_domain}
         }
 
         all_services = list(self.env.services.system) + list(self.env.services.user)
+        # Filter enabled services, and if service_names is provided, further filter by those
         enabled_service_names = {
             svc.name for svc in all_services if getattr(svc, "enabled", False)
         }
-        password_services = enabled_service_names.intersection(PASSWORD_PROTECTED_SERVICES)
+        
+        target_services = enabled_service_names
+        if service_names:
+            target_services = enabled_service_names.intersection(set(service_names))
+            
+        password_services = target_services.intersection(PASSWORD_PROTECTED_SERVICES)
 
         if not password_services:
             return
@@ -815,18 +1122,16 @@ Domains=~{self.env.local_domain}
         console.print("🔄 Fetching service credentials...")
 
         try:
-            # Service configurations mapping service name to username and Helm value path
-            output_file = os.path.join(self.k8s_dir, 'service-secrets.txt')
+            # Load existing secrets - preserve ALL services, not just password ones
+            services_dict = self._parse_secrets_file()
             found_any = False
-            file_initialized = False
-            if os.path.exists(output_file):
-                os.remove(output_file)
+            modified = False  # Track if we actually updated anything
 
             console.print("  🔍 Extracting passwords from Helm release values...")
 
             # Get all helm releases
             result = self.run_command(
-                ["helm", "list", "--all-namespaces", "-o", "json"],
+                ["helm", "--kubeconfig", self.kubeconfig, "list", "--all-namespaces", "-o", "json"],
                 capture_output=True,
                 check=False
             )
@@ -856,7 +1161,7 @@ Domains=~{self.env.local_domain}
 
                     # Get Helm values
                     values_result = self.run_command(
-                        ["helm", "get", "values", service_name, "-n", namespace, "-o", "json"],
+                        ["helm", "--kubeconfig", self.kubeconfig, "get", "values", service_name, "-n", namespace, "-o", "json"],
                         capture_output=True,
                         check=False
                     )
@@ -875,19 +1180,15 @@ Domains=~{self.env.local_domain}
                                     break
 
                             if password and password != "null":
-                                if not file_initialized:
-                                    with open(output_file, 'w') as f:
-                                        f.write(f"# Service Credentials for {self.env.name}\n")
-                                        f.write(f"# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-                                    file_initialized = True
+                                # Build service entry
+                                entry = f"Service: {service_name}\n"
+                                entry += f"Namespace: {namespace}\n"
+                                entry += f"Username: {username}\n"
+                                entry += f"Password: {password}"
 
-                                # Write to file
-                                with open(output_file, 'a') as f:
-                                    f.write(f"Service: {service_name}\n")
-                                    f.write(f"Namespace: {namespace}\n")
-                                    f.write(f"Username: {username}\n")
-                                    f.write(f"Password: {password}\n")
-                                    f.write(f"\n")
+                                # Add or update in services dictionary
+                                services_dict[service_name] = entry
+                                modified = True
 
                                 console.print(f"    ✅ Retrieved password for {service_name}")
                                 found_any = True
@@ -898,6 +1199,11 @@ Domains=~{self.env.local_domain}
                     else:
                         console.print(f"    ⚠️  Could not retrieve Helm values for {service_name}")
 
+            # Write updated secrets back to file only if we modified something
+            # This preserves other services (like garage) that weren't fetched
+            if modified and services_dict:
+                self._write_secrets_file(services_dict)
+
             if found_any:
                 console.print("")
                 console.print("🔑 Service credentials extracted successfully")
@@ -905,7 +1211,7 @@ Domains=~{self.env.local_domain}
                 console.print("  ⚠️  No service credentials found. Services may not be deployed yet or passwords may not be in Helm values.")
 
         except Exception as e:
-            console.print(f"[yellow]⚠️  Could not fetch service secrets: {e}[/yellow]")
+            console.print(f"  [yellow]⚠️  Error fetching secrets: {e}[/yellow]")
 
     def build_and_push_test_image(self):
         """Build and push test image to local registry."""
@@ -980,12 +1286,12 @@ Domains=~{self.env.local_domain}
             temp_manifest = f.name
         
         try:
-            self.run_command(["kubectl", "apply", "-f", temp_manifest])
+            self.run_command(["kubectl", "--kubeconfig", self.kubeconfig, "apply", "-f", temp_manifest])
             
             # Wait for pod to be ready
             console.print("  ⏳ Waiting for pod to be ready...")
             self.run_command([
-                "kubectl", "wait", "--for=condition=ready",
+                "kubectl", "--kubeconfig", self.kubeconfig, "wait", "--for=condition=ready",
                 "pod", "-l", "app=loko-test",
                 "-n", "loko-test",
                 "--timeout=60s"
@@ -1033,10 +1339,191 @@ Domains=~{self.env.local_domain}
         
         try:
             self.run_command([
-                "kubectl", "delete", "namespace", "loko-test", "--ignore-not-found=true"
+                "kubectl", "--kubeconfig", self.kubeconfig, "delete", "namespace", "loko-test", "--ignore-not-found=true"
             ], capture_output=True, check=False)
             
             console.print("  ✅ Test app cleaned up")
             
         except Exception as e:
             console.print(f"  [yellow]⚠️  Error during cleanup: {e}[/yellow]")
+    def configure_services(self, service_names: Optional[List[str]] = None):
+        """Perform post-deployment configuration for services."""
+        # Check if garage service is enabled and (if selective) included in deployment
+        garage_enabled = False
+        if self.env.services.system:
+            # If service_names is provided, only configure if garage is in it
+            # Otherwise (none or empty), configure if it's enabled in config
+            if service_names:
+                garage_enabled = "garage" in service_names
+            else:
+                garage_enabled = any(svc.name == "garage" and svc.enabled for svc in self.env.services.system)
+        
+        if garage_enabled:
+            self._configure_garage()
+
+    def _configure_garage(self):
+        """Configure Garage layout and create initial resources."""
+        console.print("🔄 Configuring Garage S3...")
+        
+        namespace = "common-services"
+        pod_name = "garage-0"
+        
+        # Wait for pod to be ready explicitly (extra safety)
+        console.print(f"  ⏳ Waiting for {pod_name} to be ready...")
+        try:
+             self.run_command([
+                "kubectl", "--kubeconfig", self.kubeconfig, "wait", "--for=condition=ready", 
+                "pod", pod_name, "-n", namespace, 
+                "--timeout=120s"
+            ], capture_output=True)
+        except subprocess.CalledProcessError:
+            console.print(f"  ⚠️  {pod_name} not ready, skipping configuration")
+            return
+
+        try:
+            # 1. Layout Assign
+            console.print("  🔧 Configuring layout...")
+            
+            # Get Node ID
+            node_id_res = self.run_command([
+                "kubectl", "--kubeconfig", self.kubeconfig, "exec", "-n", namespace, pod_name, "--",
+                "/garage", "node", "id", "-q"
+            ], capture_output=True)
+            node_id = node_id_res.stdout.strip()
+            
+            if not node_id:
+                 console.print("    ⚠️  Could not retrieve Node ID, failing over to pod name")
+                 node_id = pod_name
+
+            # Assign using Node ID
+            self.run_command([
+                "kubectl", "--kubeconfig", self.kubeconfig, "exec", "-n", namespace, pod_name, "--",
+                "/garage", "layout", "assign", "-z", "dc1", "-c", "1G", node_id
+            ], check=False, capture_output=True)
+            
+            # 2. Layout Apply
+            apply_res = self.run_command([
+                "kubectl", "--kubeconfig", self.kubeconfig, "exec", "-n", namespace, pod_name, "--",
+                "/garage", "layout", "apply", "--version", "1"
+            ], check=False, capture_output=True)
+            
+            if apply_res.returncode == 0:
+                console.print("    ✅ Layout applied")
+            elif "No changes to apply" in apply_res.stdout or "No changes to apply" in apply_res.stderr:
+                console.print("    ℹ️  Layout already configured")
+            else:
+                console.print(f"    ⚠️  Layout apply failed: {apply_res.stderr}")
+
+            # 3. Create Key
+            key_name = f"{self.env.name}-key"
+            console.print(f"  🔑 Creating API key '{key_name}'...")
+            
+            # Check if key exists
+            list_keys = self.run_command([
+                 "kubectl", "--kubeconfig", self.kubeconfig, "exec", "-n", namespace, pod_name, "--",
+                "/garage", "key", "list"
+            ], capture_output=True)
+            
+            key_id = None
+            secret_key = None
+            
+            if key_name in list_keys.stdout:
+                console.print(f"    ℹ️  Key '{key_name}' already exists")
+                # Try to get key info if possible, but secret is usually hidden
+                # For now, we only save if we created it
+            else:
+                create_key = self.run_command([
+                    "kubectl", "--kubeconfig", self.kubeconfig, "exec", "-n", namespace, pod_name, "--",
+                    "/garage", "key", "create", key_name
+                ], capture_output=True)
+                
+                # Parse output
+                for line in create_key.stdout.splitlines():
+                    if "Key ID" in line:
+                         key_id = line.split(":")[-1].strip()
+                    if "Secret key" in line:
+                         secret_key = line.split(":")[-1].strip()
+                
+                if key_id and secret_key:
+                    console.print(f"    ✅ Key created: {key_id}")
+                    self._save_garage_secrets(key_id, secret_key)
+                else:
+                     console.print("    ⚠️  Failed to parse key creation output")
+
+            # 4. Create Bucket
+            bucket_name = f"{self.env.name}-bucket"
+            console.print(f"  🪣 Creating bucket '{bucket_name}'...")
+            
+            # Create bucket (idempotent-ish, will fail if exists but that's fine)
+            self.run_command([
+                "kubectl", "--kubeconfig", self.kubeconfig, "exec", "-n", namespace, pod_name, "--",
+                "/garage", "bucket", "create", bucket_name
+            ], check=False, capture_output=True)
+            
+            # Enable website access for the bucket
+            self.run_command([
+                "kubectl", "--kubeconfig", self.kubeconfig, "exec", "-n", namespace, pod_name, "--",
+                "/garage", "bucket", "website", bucket_name, "--allow"
+            ], check=False, capture_output=True)
+            
+            # Allow anonymous read access for web serving
+            # The --owner flag allows unauthenticated reads
+            self.run_command([
+                "kubectl", "--kubeconfig", self.kubeconfig, "exec", "-n", namespace, pod_name, "--",
+                "/garage", "bucket", "allow", bucket_name, "--read", "--owner"
+            ], check=False, capture_output=True)
+            
+            # 5. Allow Access
+            if key_name:
+                console.print(f"  🔓 Allowing access for key '{key_name}' to bucket '{bucket_name}'...")
+                self.run_command([
+                    "kubectl", "--kubeconfig", self.kubeconfig, "exec", "-n", namespace, pod_name, "--",
+                    "/garage", "bucket", "allow", bucket_name, "--read", "--write", "--key", key_name
+                ], check=False, capture_output=True)
+                
+            console.print("✅ Garage configured")
+
+        except Exception as e:
+             console.print(f"[yellow]⚠️  Error configuring Garage: {e}[/yellow]")
+
+    def _save_garage_secrets(self, key_id, secret_key):
+        """Add or update Garage secrets in the secrets file."""
+        # Load existing secrets
+        services_dict = self._parse_secrets_file()
+
+        ca_bundle_path = os.path.join(self.k8s_dir, 'certs', 'rootCA.pem')
+
+        # Build garage entry
+        entry = f"Service: garage\n"
+        entry += f"Access Key: {key_id}\n"
+        entry += f"Secret Key: {secret_key}\n"
+        entry += f"Endpoint: https://s3.{self.env.local_domain}\n"
+        entry += f"Bucket: {self.env.name}-bucket\n"
+        entry += f"\n"
+        entry += f"AWS CLI Profile Configuration:\n"
+        entry += f"Add the following to ~/.aws/credentials:\n"
+        entry += f"\n"
+        entry += f"[garage-{self.env.name}]\n"
+        entry += f"aws_access_key_id = {key_id}\n"
+        entry += f"aws_secret_access_key = {secret_key}\n"
+        entry += f"\n"
+        entry += f"Add the following to ~/.aws/config:\n"
+        entry += f"\n"
+        entry += f"[profile garage-{self.env.name}]\n"
+        entry += f"region = garage\n"
+        entry += f"output = json\n"
+        entry += f"services = s3-garage-{self.env.name}\n"
+        entry += f"ca_bundle = {ca_bundle_path}\n"
+        entry += f"\n"
+        entry += f"[services s3-garage-{self.env.name}]\n"
+        entry += f"s3 =\n"
+        entry += f"  endpoint_url = https://s3.{self.env.local_domain}\n"
+        entry += f"\n"
+        entry += f"Usage example:\n"
+        entry += f"aws s3 ls --profile garage-{self.env.name}\n"
+
+        # Add or update garage entry
+        services_dict['garage'] = entry
+
+        # Write back to file
+        self._write_secrets_file(services_dict)

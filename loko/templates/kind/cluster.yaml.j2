@@ -14,6 +14,13 @@ networking:
   serviceSubnet: "10.11.0.0/16"
   disableDefaultCNI: false
 
+# Containerd configuration patches
+# Remove legacy mirrors config to avoid conflict with new-style certs.d/hosts.toml
+containerdConfigPatches:
+- |-
+  [plugins."io.containerd.grpc.v1.cri".registry]
+    config_path = "/etc/containerd/certs.d"
+
 # Node-specific configuration
 nodes:
 # Control plane nodes
@@ -46,7 +53,7 @@ nodes:
   - hostPath: {{ root_ca_path }}
     containerPath: {{ cacert_file }}
   - hostPath: {{ k8s_dir }}/config/containerd
-    containerPath: /etc/containerd/certs.d/{{ registry_name }}.{{ local_domain }}
+    containerPath: /etc/containerd/certs.d
   kubeadmConfigPatches:
   - |
     apiVersion: kubeadm.k8s.io/v1beta4
@@ -81,7 +88,7 @@ nodes:
   - hostPath: {{ root_ca_path }}
     containerPath: {{ cacert_file }}
   - hostPath: {{ k8s_dir }}/config/containerd
-    containerPath: /etc/containerd/certs.d/{{ registry_name }}.{{ local_domain }}
+    containerPath: /etc/containerd/certs.d
 {% if nodes.get('labels') or nodes.get('run-services-on-workers-only', False) %}
   kubeadmConfigPatches:
   - |

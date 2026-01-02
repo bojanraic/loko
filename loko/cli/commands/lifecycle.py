@@ -1,6 +1,7 @@
 """Lifecycle commands: init, create, destroy, recreate, clean."""
 import os
 import re
+import stat
 import subprocess
 import shutil
 from typing import Optional, List
@@ -10,7 +11,7 @@ from loko.config import RootConfig
 from loko.utils import load_config, get_dns_container_name, print_environment_summary
 from loko.generator import ConfigGenerator
 from loko.runner import CommandRunner
-from loko.validators import ensure_config_file, ensure_docker_running, ensure_base_dir_writable, ensure_single_server_cluster
+from loko.validators import ensure_config_file, ensure_docker_running, ensure_base_dir_writable, ensure_single_server_cluster, ensure_ports_available
 
 
 console = Console()
@@ -350,6 +351,9 @@ def create(
     # Validate cluster configuration
     ensure_single_server_cluster(config.environment.nodes.servers)
 
+    # Validate port availability before creating any resources
+    ensure_ports_available(config)
+
     console.print(f"[bold green]Creating environment '{config.environment.name}'...[/bold green]")
 
     # Run init first
@@ -374,13 +378,13 @@ def create(
     runner.create_cluster()
     runner.start_dnsmasq()
     runner.inject_dns_nameserver()
-    runner.fetch_kubeconfig()
     runner.wait_for_cluster_ready()
     runner.set_control_plane_scheduling()
     runner.label_nodes()
     runner.list_nodes()
     runner.setup_wildcard_cert()
     runner.deploy_services()
+    runner.configure_services()
     runner.fetch_service_secrets()
 
     # Print environment summary
@@ -414,8 +418,53 @@ def destroy(config_file: str = "loko.yaml") -> None:
     else:
         console.print(f"ℹ️  DNS container '{dns_container}' does not exist")
 
-    # Remove resolver file
-    runner.remove_resolver_file()
+    # Remove resolver file (handle gracefully if sudo fails)
+    try:
+        runner.remove_resolver_file()
+    except Exception as e:
+        console.print(f"[yellow]⚠️  Could not remove resolver file (may require sudo): {e}[/yellow]")
+
+    # Remove environment directory
+    env_dir = runner.k8s_dir
+    if os.path.exists(env_dir):
+        console.print(f"🔄 Removing environment directory '{env_dir}'...")
+        try:
+            # Try to remove normally first
+            shutil.rmtree(env_dir)
+            console.print(f"✅ Environment directory removed")
+        except PermissionError:
+            # If permission denied, try to change permissions and retry
+            console.print(f"[yellow]⚠️  Permission denied, attempting to fix permissions...[/yellow]")
+            try:
+                # Change permissions recursively to make everything writable
+                def make_writable(path):
+                    """Make a path writable by adding write permissions."""
+                    try:
+                        os.chmod(path, stat.S_IWUSR | stat.S_IRUSR | stat.S_IXUSR)
+                    except (PermissionError, OSError):
+                        pass  # If we can't change permissions, continue anyway
+
+                # Walk the directory tree and make everything writable
+                try:
+                    for root, dirs, files in os.walk(env_dir, topdown=False):
+                        for name in files:
+                            make_writable(os.path.join(root, name))
+                        for name in dirs:
+                            make_writable(os.path.join(root, name))
+                    make_writable(env_dir)
+                except (PermissionError, OSError):
+                    # If we can't even walk the directory, just try to remove it anyway
+                    pass
+
+                # Try removal again
+                shutil.rmtree(env_dir)
+                console.print(f"✅ Environment directory removed")
+            except Exception as e:
+                # If all else fails, warn the user but don't fail the command
+                console.print(f"[yellow]⚠️  Could not fully remove environment directory '{env_dir}': {e}[/yellow]")
+                console.print(f"[yellow]    You may need to manually remove it with: sudo rm -rf {env_dir}[/yellow]")
+    else:
+        console.print(f"ℹ️  Environment directory '{env_dir}' does not exist")
 
     console.print(f"✅ Environment '{cluster_name}' destroyed")
 
@@ -465,7 +514,7 @@ def recreate(
 
     console.print(f"[bold blue]Recreating environment '{config.environment.name}'...[/bold blue]\n")
 
-    # Destroy first
+    # Destroy first (this will free up ports)
     destroy(config_file)
 
     console.print()

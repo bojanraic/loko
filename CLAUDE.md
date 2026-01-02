@@ -20,12 +20,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 1. **CLI Layer** (`loko/cli/`):
    - Modular CLI architecture using Typer framework
    - Entry point: `loko/cli/__init__.py` with main `app` (Typer instance)
-   - Subcommand groups: `config_app` for configuration-related commands
+   - Subcommand groups: `config_app`, `service_app`, `secret_app` for grouped commands
    - **Command Organization** (`loko/cli/commands/`):
      - `lifecycle.py` - `init`, `create`, `destroy`, `recreate`, `clean` commands
      - `control.py` - `start`, `stop` commands
      - `status.py` - `status`, `validate` commands
-     - `config.py` - `generate-config`, `config upgrade`, `config helm-repo-add`, `config helm-repo-remove`, `secrets` commands
+     - `config.py` - `generate-config`, `config upgrade`, `config helm-repo-add`, `config helm-repo-remove` commands
+     - `services.py` - `service list`, `service deploy`, `service undeploy` commands
+     - `secrets.py` - `secret fetch`, `secret show` commands
      - `utility.py` - `version`, `check-prerequisites` commands
    - **CLI Type Definitions** (`loko/cli_types.py`):
      - Reusable `Annotated` type definitions for CLI arguments
@@ -34,6 +36,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    - **Runtime prerequisite checks** (`loko/validators.py`):
      - `ensure_docker_running()` - Ensures docker daemon is accessible
      - `ensure_config_file()` - Ensures config file exists
+     - `ensure_ports_available()` - Validates DNS, LB, and service ports before cluster creation
      - Provides helpful error messages guiding users to solutions
    - **Help system**: Supports both `-h` and `--help` via `context_settings={"help_option_names": ["-h", "--help"]}`
    - **Shell Completion**: Uses Typer's built-in completion system (`add_completion=True`)
@@ -168,12 +171,24 @@ kubernetes:
 - `internal-components-on-control-plane`: Forces infrastructure components (Traefik, registry) on control plane
 - `run-services-on-workers-only`: Forces application services only on worker nodes
 
+### Secrets Management
+Loko uses a structured secrets file (`service-secrets.txt`) to manage service credentials:
+- **Format**: Services separated by `---` delimiters for clean parsing
+- **Operations**:
+  - `fetch_service_secrets()` - Fetches passwords from deployed services, preserves non-password services
+  - `remove_service_secrets()` - Removes secrets for undeployed services
+  - `_parse_secrets_file()` - Parses structured format into service dictionary
+  - `_write_secrets_file()` - Writes services with alphabetical sorting and clean delimiters
+- **Deduplication**: Updates existing entries instead of appending, prevents duplicates
+- **Preservation**: Non-password services (garage, custom services) are preserved during password fetches
+- **Order**: `configure_services()` runs before `fetch_service_secrets()` to ensure all secrets are captured
+
 ### Runtime Prerequisite Checks and Error Handling
 Commands verify prerequisites BEFORE executing and provide helpful, actionable error messages:
 - **Missing Config File**: Guides user to either specify existing config with `--config` or generate new one with `generate-config`
 - **Docker Not Running**: Clear message to start docker daemon before attempting command
 - **Check Order**: Config file check runs first, then docker check (fail-fast approach)
-- **Apply to**: All commands that need config: `init`, `create`, `destroy`, `recreate`, `clean`, `start`, `stop`, `status`, `validate`, `secrets`, `config upgrade`
+- **Apply to**: All commands that need config: `init`, `create`, `destroy`, `recreate`, `clean`, `start`, `stop`, `status`, `validate`, `secret`, `config upgrade`
 
 ## Important Patterns and Details
 
@@ -213,6 +228,8 @@ loko/
 │   │   │   ├── control.py         # start, stop
 │   │   │   ├── status.py          # status, validate
 │   │   │   ├── config.py          # config-related commands
+│   │   │   ├── services.py        # service list, deploy, undeploy
+│   │   │   ├── secrets.py         # secret fetch, show
 │   │   │   └── utility.py         # version, check-prerequisites
 │   ├── cli_types.py               # Reusable CLI type definitions (Annotated types)
 │   ├── validators.py              # Validation functions (ensure_docker_running, ensure_config_file)

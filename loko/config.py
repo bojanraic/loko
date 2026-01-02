@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any, Union, Literal
 from pydantic import BaseModel, Field
 
 class ProviderConfig(BaseModel):
@@ -22,9 +22,18 @@ class NodesConfig(BaseModel):
     internal_components_on_control_plane: bool = Field(alias="internal-components-on-control-plane")
     labels: Optional[NodeLabels] = None
 
+class RegistryMirroringConfig(BaseModel):
+    enabled: bool = True
+    docker_hub: bool = True
+    quay: bool = True
+    ghcr: bool = True
+    k8s_registry: bool = True
+    mcr: bool = True
+
 class RegistryConfig(BaseModel):
     name: str
     storage: Dict[str, str]
+    mirroring: RegistryMirroringConfig = Field(default_factory=RegistryMirroringConfig)
 
 class HelmRepoConfig(BaseModel):
     name: str
@@ -34,9 +43,10 @@ class ServiceRepoConfig(BaseModel):
     ref: Optional[str] = None
     name: Optional[str] = None
     url: Optional[str] = None
+    type: Literal["helm", "git"] = "helm"
 
 class ServiceConfig(BaseModel):
-    repo: ServiceRepoConfig
+    repo: Optional[ServiceRepoConfig] = None
     chart: str
     version: str
     values: Optional[Dict[str, Any]] = None

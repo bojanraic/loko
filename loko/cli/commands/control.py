@@ -2,7 +2,7 @@
 import sys
 from rich.console import Console
 
-from loko.validators import ensure_config_file, ensure_docker_running
+from loko.validators import ensure_config_file, ensure_docker_running, ensure_ports_available
 from loko.runner import CommandRunner
 from loko.cli_types import ConfigArg
 from loko.utils import get_dns_container_name, print_environment_summary
@@ -60,6 +60,9 @@ def start(config_file: ConfigArg = "loko.yaml") -> None:
     if not cluster_stopped and not dns_stopped:
         console.print(f"[green]ℹ️  Environment '{cluster_name}' is already running[/green]")
         return
+
+    # Validate port availability before starting containers
+    ensure_ports_available(config)
 
     # Something needs starting
     console.print(f"[bold green]Starting environment '{cluster_name}'...[/bold green]")

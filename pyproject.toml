@@ -1,6 +1,6 @@
 [project]
 name = "loko-k8s"
-version = "0.0.8"
+version = "0.0.9"
 description = "Local Kubernetes Environment Manager - Simplified local K8s development with Kind"
 authors = [
     {name = "Bojan Raic", email = "code+loko@bojan.io"},
@@ -59,3 +59,8 @@ packages = ["loko"]
 
 [tool.hatch.build.targets.sdist]
 include = ["loko"]
+
+[dependency-groups]
+dev = [
+    "pytest-timeout>=2.4.0",
+]

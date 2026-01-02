@@ -22,11 +22,15 @@ A Python CLI utility to manage local Kubernetes environments with Kind, providin
 - 🌐 **Local DNS**: Automatic DNS configuration for local development
 - 📈 **Metrics & Monitoring**: Built-in metrics-server for resource monitoring and HPA support
 - 📊 **Comprehensive Status**: Detailed view of cluster resources with `loko status`
+- 🧩 **Granular Service Management**: List, deploy, and undeploy individual services with `loko service`
 - 🎯 **Advanced Node Scheduling**: Flexible node labeling and workload placement
+- 🔄 **Registry Mirroring**: Automatic caching/mirroring of external registries (Docker Hub, Quay, etc.)
 - 🔧 **Service Presets**: Pre-configured settings for common services (MySQL, PostgreSQL, Valkey, etc.)
 - 🛠️ **Helm-based Deployment**: Deploy services from public repositories (groundhog2k, etc.)
 - 🗂️ **Centralized Helm Repos**: Define repositories once, reference everywhere
-- 🔑 **Automatic Secrets Management**: Automatically generate, fetch and save service credentials
+- 🔑 **Automatic Secrets Management**: Automatically generate, fetch and save service credentials with deduplication
+- 🔍 **Port Availability Checking**: Pre-flight validation ensures all required ports are available before cluster creation
+- ⚡ **Smart Error Handling**: Clear, actionable error messages guide you to solutions
 
 ## Prerequisites
 
@@ -132,7 +136,11 @@ Watch Loko in action - see the complete workflow from installation to cluster va
 - `loko config upgrade` - Upgrade component versions using Renovate comments
 - `loko config helm-repo-add` - Add Helm repositories to config
 - `loko config helm-repo-remove` - Remove Helm repositories from config
-- `loko secrets` - Fetch and display service credentials
+- `loko service list` - List enabled services and their status
+- `loko service deploy` - Deploy all or specific services
+- `loko service undeploy` - Undeploy all or specific services
+- `loko secret fetch` - Fetch service credentials from cluster
+- `loko secret show` - Display saved service credentials
 - `loko config presets` - View available service presets (coming soon)
 
 ## Checking Cluster Status
@@ -288,13 +296,19 @@ environment:
 
 ## Managing Service Credentials
 
-Service credentials (database passwords, etc.) are automatically generated during deployment. To view them:
+Service credentials (database passwords, etc.) are automatically generated during deployment. Loko provide a dedicated command group to manage them:
 
 ```bash
-loko secrets
+# Fetch credentials from the cluster
+loko secret fetch
+
+# Display saved credentials
+loko secret show
 ```
 
-This fetches credentials from the cluster and displays them. Credentials are also saved to:
+> **Tip**: `loko secret show` will automatically trigger a `fetch` if the secrets file doesn't exist yet.
+
+Credentials are saved locally to:
 ```
 <base-dir>/<env-name>/service-secrets.txt
 ```
@@ -322,7 +336,9 @@ When you run `loko init` or `loko create`, a `.local` directory is created (conf
 │       │   └── <domain>-combined.pem  # Combined cert and key
 │       ├── config/                    # Generated configuration files
 │       │   ├── cluster.yaml           # KinD cluster configuration
-│       │   ├── containerd.yaml        # Container runtime config
+│       │   ├── containerd/            # Container runtime config (per registry)
+│       │   │   ├── cr.dev.me/hosts.toml
+│       │   │   └── docker.io/hosts.toml
 │       │   ├── dnsmasq.conf           # Local DNS configuration
 │       │   └── helmfile.yaml          # Helm releases definition
 │       ├── logs/                      # Kubernetes node logs
@@ -335,7 +351,44 @@ When you run `loko init` or `loko create`, a `.local` directory is created (conf
 
 ## Service Management
 
-The environment manages development services (databases, message queues, etc.) through Helm deployments.
+Loko permits granular control over your services through the `services` command group.
+
+### Listing Services
+
+View all enabled services, their type, namespace, and current status:
+
+```bash
+loko service list
+```
+
+You can filter by type:
+```bash
+loko service list --user      # Only user services
+loko service list --system    # Only system services
+loko service list --internal  # Only internal components (Traefik, Registry, etc.)
+```
+
+### Deploying and Undeploying
+
+Deploy or undeploy specific services:
+
+```bash
+# Deploy all user and system services
+loko service deploy
+
+# Deploy a specific service
+loko service deploy mongodb
+
+# Undeploy a specific service
+loko service undeploy garage
+
+# Include internal services
+loko service deploy --internal
+```
+
+The `deploy` and `undeploy` commands default to targeting **user** and **system** services. Use `--all` or specific type flags to include internal components.
+
+> **Note**: selective deployment uses `helmfile --selector` under the hood.
 
 ### Service Types and DNS Structure
 
@@ -370,7 +423,7 @@ Once the environment is running, services are accessible through:
 
 3. **Service Credentials**:
    - Passwords are automatically generated and stored in `<local-dir>/<env-name>/service-secrets.txt`
-   - Or fetch them with: `loko secrets`
+   - Or fetch them with: `loko secret`
 
 ### Using the Local Container Registry
 
@@ -512,7 +565,7 @@ Loko runs a lightweight DNS container on your machine so that services such as `
 3. **Service Access Issues**
    - Validate environment: `loko validate`
    - Verify ingress: `kubectl get ingress -A`
-   - Check credentials: `loko secrets`
+   - Check credentials: `loko secret`
 
 4. **OCI Registry Issues**
    - Test registry connectivity: `docker pull cr.dev.me/test:latest`

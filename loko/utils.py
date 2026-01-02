@@ -16,6 +16,7 @@ PASSWORD_PROTECTED_SERVICES = {
     "mongodb",
     "rabbitmq",
     "valkey",
+    "garage"
 }
 
 def load_config(config_path: str) -> RootConfig:

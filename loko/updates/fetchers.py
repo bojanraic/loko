@@ -81,11 +81,11 @@ def fetch_latest_docker_version(dep_name: str) -> tuple[Optional[str], float]:
 
 def fetch_latest_helm_versions_batch(repository_url: str, dep_names: list[str]) -> dict[str, tuple[Optional[str], float]]:
     """
-    Fetch the latest versions for multiple charts from a single Helm repository.
+    Fetch latest versions for multiple charts from a single Helm repository.
     Returns a dict mapping dep_name -> (version, elapsed_time_seconds)
     """
     start_time = time.time()
-    results = {name: (None, 0.0) for name in dep_names}
+    results: dict[str, tuple[Optional[str], float]] = {name: (None, 0.0) for name in dep_names}
 
     if not repository_url:
         console.print(f"[yellow]Warning: No repository URL provided for batch fetch[/yellow]")
@@ -123,7 +123,7 @@ def fetch_latest_helm_versions_batch(repository_url: str, dep_names: list[str]) 
                 results[dep_name] = (None, fetch_duration) # Assign fetch time even if not found
                 continue
 
-            found_version = None
+            found_version: Optional[str] = None
             # Charts are usually sorted by version in descending order
             for version_info in chart_versions:
                 version_str = version_info.get('version', '')
@@ -159,6 +159,7 @@ def fetch_latest_helm_version(dep_name: str, repository_url: Optional[str] = Non
         'app-template': 'https://bjw-s-labs.github.io/helm-charts',
         'traefik': 'https://traefik.github.io/charts',
         'metrics-server': 'https://kubernetes-sigs.github.io/metrics-server',
+        'zot': 'http://zotregistry.dev/helm-charts',
         'mysql': 'https://groundhog2k.github.io/helm-charts',
         'postgres': 'https://groundhog2k.github.io/helm-charts',
         'mongodb': 'https://groundhog2k.github.io/helm-charts',
@@ -186,6 +187,10 @@ def fetch_latest_version(renovate_info: dict) -> tuple[Optional[str], float]:
     """
     datasource = renovate_info.get('datasource')
     dep_name = renovate_info.get('depName')
+
+    if not dep_name:
+        console.print(f"[yellow]Warning: No depName found in renovate info[/yellow]")
+        return None, 0.0
 
     if datasource == 'docker':
         return fetch_latest_docker_version(dep_name)

@@ -73,11 +73,16 @@ environment:
   registry:
     name: cr # name, to be used in the final url for the registry, i.e. <registry.name>.<local-domain>
     storage: # use PVC for storage
-      size: 10Gi # size of PVC  
+      size: 10Gi # size of PVC
+    mirroring:
+      enabled: true # whether to enable registry mirroring for faster image pulls
+      docker_hub: true # mirror Docker Hub (registry-1.docker.io)
+      quay: true # mirror Quay.io
+      ghcr: true # mirror GitHub Container Registry
+      k8s_registry: true # mirror Kubernetes registries (k8s.gcr.io, registry.k8s.io)
+      mcr: true # mirror Microsoft Container Registry  
 
   internal-components:
-    # renovate: datasource=helm depName=app-template repositoryUrl=https://bjw-s-labs.github.io/helm-charts
-    - app-template: "4.5.0"
 
     # renovate: datasource=helm depName=traefik repositoryUrl=https://traefik.github.io/charts
     - traefik: "38.0.1"
@@ -85,8 +90,8 @@ environment:
     # renovate: datasource=helm depName=metrics-server repositoryUrl=https://kubernetes-sigs.github.io/metrics-server
     - metrics-server: "3.13.0"
 
-    # renovate: datasource=docker depName=registry
-    - registry: "3.0.0"
+    # renovate: datasource=helm depName=zot repositoryUrl=http://zotregistry.dev/helm-charts
+    - zot: "0.1.95"
 
     # renovate: datasource=docker depName=dockurr/dnsmasq
     - dnsmasq: "2.91"
@@ -189,6 +194,71 @@ environment:
           # renovate: datasource=helm depName=valkey repositoryUrl=https://groundhog2k.github.io/helm-charts
           version: 2.2.3
           # Valkey persistence handled automatically (no authentication)
+
+      - name: garage
+        enabled: false
+        namespace: common-services
+        ports:
+          - 3900
+          - 3902
+        storage:
+          size: 20Gi
+        config:
+          repo:
+            type: git
+            url: https://git.deuxfleurs.fr/Deuxfleurs/garage.git
+          chart: script/helm/garage
+          # renovate: datasource=git-tags depName=garage packageName=https://git.deuxfleurs.fr/Deuxfleurs/garage.git
+          version: v2.1.0 # Tag or branch
+          values:
+            dbEngine: lmdb  # Database engine: lmdb (recommended) or sqlite
+            deployment:
+              replicaCount: 1  # Number of Garage instances
+            garage:
+              replicationFactor: 1  # Data replication factor (must be <= replicaCount)
+              s3:
+                api:
+                  rootDomain: ".s3.${LOCAL_DOMAIN}"  # Root domain for S3 API
+                web:
+                  rootDomain: ".garage.${LOCAL_DOMAIN}"  # Root domain for web interface
+            s3:
+              api:
+                port: 3900  # S3 API port
+              web:
+                port: 3902  # Web interface port
+            ingress:
+              s3:
+                api:
+                  enabled: true
+                  className: traefik
+                  annotations:
+                    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+                    traefik.ingress.kubernetes.io/router.tls: "true"
+                  hosts:
+                    - host: "s3.${LOCAL_DOMAIN}"
+                      paths:
+                        - path: /
+                          pathType: Prefix
+                    - host: "*.s3.${LOCAL_DOMAIN}"
+                      paths:
+                        - path: /
+                          pathType: Prefix
+                web:
+                  enabled: true
+                  className: traefik
+                  annotations:
+                    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+                    traefik.ingress.kubernetes.io/router.tls: "true"
+                  hosts:
+                    - host: "garage.${LOCAL_DOMAIN}"
+                      paths:
+                        - path: /
+                          pathType: Prefix
+                    - host: "*.garage.${LOCAL_DOMAIN}"
+                      paths:
+                        - path: /
+                          pathType: Prefix
+
 
     # User services - additional services users can add without presets
     # Users are expected to provide:

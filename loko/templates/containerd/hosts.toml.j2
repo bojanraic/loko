@@ -1,6 +1,9 @@
-host."https://{{ registry_name }}.{{ local_domain }}":
-  capabilities:
-    - pull
-    - resolve
-    - push
-  ca_file: {{ cacert_file }}
+# Configuration for {{ hostname }} Registry
+server = "https://{{ upstream_hostname }}"
+
+[host."https://{{ registry_host }}{% if mirror_prefix %}/v2{{ mirror_prefix }}{% endif %}"]
+  capabilities = [{% if is_local_registry %}"pull", "resolve", "push"{% else %}"pull", "resolve"{% endif %}]
+  ca_file = "{{ cacert_file }}"
+  {% if mirror_prefix %}
+  override_path = true
+  {% endif %}

@@ -84,10 +84,11 @@ from .commands.status import (
 from .commands.config import (
     generate_config as config_generate,
     config_upgrade as config_upgrade_cmd,
-    secrets_fetch as config_secrets,
     helm_repo_add,
     helm_repo_remove,
 )
+from .commands.services import app as service_app
+from .commands.secrets import app as secret_app
 from .commands.utility import (
     version as utility_version,
     check_prerequisites as utility_check_prerequisites,
@@ -139,6 +140,8 @@ config_app = typer.Typer(
     context_settings={"help_option_names": ["-h", "--help"]},
 )
 app.add_typer(config_app)
+app.add_typer(service_app)
+app.add_typer(secret_app)
 
 console = Console()
 
@@ -303,12 +306,6 @@ def validate(config_file: ConfigArg = "loko.yaml"):
     """
     status_validate(config_file)
 
-@app.command()
-def secrets(config_file: ConfigArg = "loko.yaml"):
-    """
-    Fetch and save service credentials to a file.
-    """
-    config_secrets(config_file)
 
 @app.command()
 def version():

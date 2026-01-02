@@ -180,6 +180,8 @@ def test_init_creates_directory_structure(test_config_file, integration_workspac
     assert env_dir.is_dir()
     assert config_subdir.exists()
     assert config_subdir.is_dir()
+    assert (config_subdir / "containerd").exists()
+    assert (config_subdir / "containerd").is_dir()
 
 
 @pytest.mark.integration

@@ -73,26 +73,6 @@ def config_upgrade(
     upgrade_config(config_file)
 
 
-def secrets_fetch(config_file: ConfigArg = "loko.yaml") -> None:
-    """
-    Fetch and save service credentials to a file.
-    """
-    from loko.validators import ensure_docker_running
-    from loko.runner import CommandRunner
-    from .lifecycle import get_config
-
-    ensure_config_file(config_file)
-    ensure_docker_running()
-
-    console.print("[bold blue]Fetching service credentials...[/bold blue]\n")
-    config = get_config(config_file)
-    runner = CommandRunner(config)
-
-    try:
-        runner.fetch_service_secrets()
-    except Exception as e:
-        console.print(f"[bold red]Error fetching secrets: {e}[/bold red]")
-        sys.exit(1)
 
 
 def helm_repo_add(
