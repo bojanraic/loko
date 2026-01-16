@@ -12,7 +12,7 @@ uv = "latest"
 # Kubernetes infrastructure
 kind = "0.31.0"
 kubectl = "1.35.0"
-helm = "4.0.4"
+helm = "4.0.5"
 helmfile = "1.2.3"
 
 # Certificate generation
