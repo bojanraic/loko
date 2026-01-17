@@ -1,4 +1,4 @@
-# Mise configuration for Loko development environment
+# Mise configuration for Loko development environment - used by CI/CD
 # https://mise.jdx.dev/
 
 [env]

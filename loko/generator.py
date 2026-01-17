@@ -268,6 +268,28 @@ class ConfigGenerator:
 
         return repositories
 
+    def _prepare_registry_context(self) -> Dict[str, Any]:
+        """Prepare registry context with mirroring sources as a dict for template access."""
+        registry = self.env.registry
+        mirroring = registry.mirroring
+
+        # Build a dict mapping source name -> enabled status for easy template access
+        # e.g., registry.mirroring.docker_hub -> True/False
+        sources_dict = {}
+        for source in mirroring.sources:
+            sources_dict[source.name] = source.enabled
+
+        return {
+            'name': registry.name,
+            'storage': {'size': registry.storage.size},
+            'mirroring': {
+                'enabled': mirroring.enabled,
+                'sources': [{'name': s.name, 'enabled': s.enabled} for s in mirroring.sources],
+                # Add individual source flags for template compatibility
+                **sources_dict,
+            },
+        }
+
     def prepare_context(self) -> Dict[str, Any]:
         workload_ports, workload_values_presets = self.get_presets()
 
@@ -345,8 +367,8 @@ class ConfigGenerator:
                 }
             },
 
-            # Registry
-            'registry': self.env.registry.model_dump(by_alias=True, exclude_none=True),
+            # Registry - build a structure compatible with templates
+            'registry': self._prepare_registry_context(),
             'registry_name': self.env.registry.name,
 
             # Internal components

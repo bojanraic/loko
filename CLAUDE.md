@@ -28,7 +28,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
      - `config.py` - `config generate`, `config detect-ip`, `config validate`, `config port-check`, `config upgrade`, `config helm-repo-add`, `config helm-repo-remove` commands
      - `workloads.py` - `workload list`, `workload deploy`, `workload undeploy` commands
      - `secrets.py` - `secret fetch`, `secret show` commands
+     - `registry.py` - `registry status`, `registry list-repos`, `registry show-repo`, `registry list-tags` commands
      - `utility.py` - `version`, `check-prerequisites` commands
+     - `completion.py` - `completion` command (shell completion scripts)
    - **CLI Type Definitions** (`loko/cli_types.py`):
      - Reusable `Annotated` type definitions for CLI arguments
      - Examples: `ConfigArg`, `NameArg`, `DomainArg`, `WorkersArg`, etc.
@@ -39,10 +41,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
      - `ensure_ports_available()` - Validates DNS, LB, and workload ports before cluster creation
      - Provides helpful error messages guiding users to solutions
    - **Help system**: Supports both `-h` and `--help` via `context_settings={"help_option_names": ["-h", "--help"]}`
-   - **Shell Completion**: Uses Typer's built-in completion system (`add_completion=True`)
-     - Auto-detects current shell (bash, zsh, fish, powershell)
-     - Users run `loko --install-completion` to install completion
-     - Users run `loko --show-completion` to view completion script
+   - **Shell Completion**: Custom `completion` subcommand (kubectl-style)
+     - Supports bash, zsh, fish (no powershell - macOS/Linux only)
+     - Users source the output: `source <(loko completion zsh)`
+     - Implementation in `loko/cli/commands/completion.py`
 
 2. **Configuration** (`loko/config.py`):
    - Pydantic models defining the configuration schema
@@ -326,7 +328,9 @@ loko/
 │   │   │   ├── config.py          # config-related commands
 │   │   │   ├── workloads.py       # workload list, deploy, undeploy
 │   │   │   ├── secrets.py         # secret fetch, show
-│   │   │   └── utility.py         # version, check-prerequisites
+│   │   │   ├── registry.py        # registry status, list-repos, show-repo, list-tags
+│   │   │   ├── utility.py         # version, check-prerequisites
+│   │   │   └── completion.py      # shell completion generation (bash, zsh, fish)
 │   ├── cli_types.py               # Reusable CLI type definitions (Annotated types)
 │   ├── validators.py              # Validation functions (ensure_docker_running, ensure_config_file)
 │   ├── config.py                  # Pydantic configuration models

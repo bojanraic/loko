@@ -118,3 +118,44 @@ def test_no_args_shows_help():
     result = runner.invoke(app, [])
     # Should show help or usage information
     assert "loko" in result.stdout.lower() or "usage" in result.stdout.lower()
+
+
+def test_completion_help():
+    """Test loko completion --help command."""
+    result = runner.invoke(app, ["completion", "--help"])
+    assert result.exit_code == 0
+    assert "completion" in result.stdout.lower()
+    assert "bash" in result.stdout.lower()
+    assert "zsh" in result.stdout.lower()
+    assert "fish" in result.stdout.lower()
+
+
+def test_completion_bash():
+    """Test loko completion bash outputs valid bash completion script."""
+    result = runner.invoke(app, ["completion", "bash"])
+    assert result.exit_code == 0
+    assert "_loko_completion" in result.stdout
+    assert "complete" in result.stdout
+    assert "COMPREPLY" in result.stdout
+
+
+def test_completion_zsh():
+    """Test loko completion zsh outputs valid zsh completion script."""
+    result = runner.invoke(app, ["completion", "zsh"])
+    assert result.exit_code == 0
+    assert "#compdef loko" in result.stdout
+    assert "_loko_completion" in result.stdout
+    assert "compdef" in result.stdout
+
+
+def test_completion_fish():
+    """Test loko completion fish outputs valid fish completion script."""
+    result = runner.invoke(app, ["completion", "fish"])
+    assert result.exit_code == 0
+    assert "complete" in result.stdout and "loko" in result.stdout
+
+
+def test_completion_invalid_shell():
+    """Test loko completion with invalid shell argument."""
+    result = runner.invoke(app, ["completion", "powershell"])
+    assert result.exit_code != 0

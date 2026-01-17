@@ -10,6 +10,7 @@ from typing_extensions import Annotated
 from pathlib import Path
 from importlib.metadata import metadata
 
+
 # Detect if running from source directory (editable install) vs installed package
 def _is_running_from_source() -> bool:
     """Check if loko is running from source (editable install) or as installed package."""
@@ -92,9 +93,14 @@ from .commands.config import (
 )
 from .commands.workloads import app as workload_app
 from .commands.secrets import app as secret_app
+from .commands.registry import app as registry_app
 from .commands.utility import (
     version as utility_version,
     check_prerequisites as utility_check_prerequisites,
+)
+from .commands.completion import (
+    completion as completion_cmd,
+    Shell as CompletionShell,
 )
 
 def get_repository_url() -> str:
@@ -130,7 +136,7 @@ def version_callback(
 app = typer.Typer(
     name="loko",
     help="Local Kubernetes Environment Manager - Create and manage local K8s clusters with Kind, DNS via dnsmasq, SSL certificates via mkcert, and workload deployment via Helm/Helmfile. Perfect for local development without cloud dependencies.",
-    add_completion=True,
+    add_completion=False,
     no_args_is_help=True,
     pretty_exceptions_enable=True,
     pretty_exceptions_show_locals=_DEV_MODE,
@@ -145,6 +151,7 @@ config_app = typer.Typer(
 app.add_typer(config_app)
 app.add_typer(workload_app)
 app.add_typer(secret_app)
+app.add_typer(registry_app)
 
 console = Console()
 
@@ -327,18 +334,32 @@ def help():
     console.print(ctx.get_help())
 
 @app.command(name="check-prerequisites")
-def check_prerequisites(
-    install: Annotated[bool, typer.Option(
-        "--install", "-i",
-        help="Attempt to install missing tools via mise"
-    )] = False
-):
+def check_prerequisites():
     """
     Check if all required tools are installed.
-
-    Use --install to automatically install missing tools via mise.
     """
-    utility_check_prerequisites(install=install)
+    utility_check_prerequisites()
+
+
+@app.command()
+def completion(
+    shell: Annotated[CompletionShell, typer.Argument(help="Shell type (bash, zsh, fish)")]
+):
+    """
+    Generate shell completion script.
+
+    Output completion script for the specified shell. Source in your shell config:
+
+        # bash (~/.bashrc)
+        source <(loko completion bash)
+
+        # zsh (~/.zshrc)
+        source <(loko completion zsh)
+
+        # fish (~/.config/fish/config.fish)
+        loko completion fish | source
+    """
+    completion_cmd(shell)
 
 
 @config_app.command("generate")
@@ -457,5 +478,47 @@ def helm_repo_remove_command(
     helm_repo_remove(config_file, repos)
 
 
-if __name__ == "__main__":
+def _handle_completion() -> bool:
+    """
+    Handle shell completion if _LOKO_COMPLETE env var is set.
+
+    Click uses format: {shell}_complete (e.g., "zsh_complete")
+    """
+    complete_var = os.environ.get("_LOKO_COMPLETE")
+    if not complete_var:
+        return False
+
+    from click.shell_completion import get_completion_class
+
+    # Parse instruction: Click uses "{shell}_{instruction}" format
+    if "_" not in complete_var:
+        return False
+
+    shell, _, instruction = complete_var.partition("_")
+
+    comp_cls = get_completion_class(shell)
+    if comp_cls is None:
+        return False
+
+    # Get the Click command from our Typer app
+    cmd = typer.main.get_command(app)
+    comp = comp_cls(cmd, {}, "loko", "_LOKO_COMPLETE")
+
+    if instruction == "source":
+        print(comp.source())
+        sys.exit(0)
+    elif instruction == "complete":
+        print(comp.complete())
+        sys.exit(0)
+
+    return False
+
+
+def main() -> None:
+    """Entry point that handles completion before running the app."""
+    _handle_completion()
     app()
+
+
+if __name__ == "__main__":
+    main()

@@ -48,7 +48,7 @@ Repository = "https://github.com/bojanraic/loko"
 Issues = "https://github.com/bojanraic/loko/issues"
 
 [project.scripts]
-loko = "loko.cli:app"
+loko = "loko.cli:main"
 
 [build-system]
 requires = ["hatchling"]

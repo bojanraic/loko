@@ -76,8 +76,18 @@ A Python CLI utility to manage local Kubernetes environments with Kind, providin
 - [Kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
 - [mkcert](https://github.com/FiloSottile/mkcert#installation) (for HTTPS certificates)
 - [Helm](https://helm.sh/docs/intro/install/)
-- [Helmfile](https://github.com/helmfile/helmfile#installation) (optional, for workload deployment)
+- [Helmfile](https://github.com/helmfile/helmfile#installation)
 - (optional) nss (for macOS) or libnss3-tools (for Linux) - needed for Firefox to trust mkcert certificates
+
+### Installing Prerequisites with Mise (Recommended)
+
+[Mise](https://mise.jdx.dev/) is the recommended way to install and manage CLI tools. Clone the repo and run `mise install` from the project root to install all prerequisites:
+
+```bash
+git clone https://github.com/bojanraic/loko.git
+cd loko
+mise install  # Installs kind, helm, kubectl, mkcert, helmfile
+```
 
 ## Installation
 
@@ -150,7 +160,7 @@ Watch Loko in action - see the complete workflow from installation to cluster va
 - Upgrading component versions
 - Viewing workload secrets & connecting to PostgreSQL and test application
 - Stopping and starting environment
-- Installing shell completion (via `--install-completion`)
+- Installing shell completion (via `loko completion <shell>`)
 
 ## Commands
 
@@ -167,6 +177,7 @@ Watch Loko in action - see the complete workflow from installation to cluster va
 - `loko status` - Show comprehensive environment status
 - `loko validate` - Validate the environment
 - `loko check-prerequisites` - Check if required tools are installed
+- `loko completion <shell>` - Generate shell completion script (bash, zsh, fish)
 
 ### Configuration & Secrets
 - `loko config generate` - Generate default loko.yaml with auto-detected local IP
@@ -181,6 +192,10 @@ Watch Loko in action - see the complete workflow from installation to cluster va
 - `loko workload undeploy` - Undeploy all or specific workloads
 - `loko secret fetch` - Fetch workload credentials from cluster
 - `loko secret show` - Display saved workload credentials
+- `loko registry status` - Show registry statistics and configuration
+- `loko registry list-repos` - List all repositories in the registry
+- `loko registry show-repo <name>` - Show details about a specific repository
+- `loko registry list-tags <name>` - List all tags for a repository
 
 ## Checking Cluster Status
 
@@ -527,6 +542,27 @@ This runs a comprehensive check including:
 3. System pods status
 4. Kubectl connectivity
 5. **Registry & TLS Validation**: Builds a test image, pushes to local registry, deploys a test app, and verifies connectivity.
+
+### Inspecting the Registry
+
+Use the `registry` command group to inspect and manage the local container registry:
+
+```bash
+# Show registry statistics and configuration
+loko registry status
+
+# List all repositories (local and mirrored)
+loko registry list-repos
+
+# Show details about a specific repository
+loko registry show-repo myapp
+loko registry show-repo docker.io/library/nginx
+
+# List all tags for a repository
+loko registry list-tags myapp
+```
+
+When mirroring is enabled, images pulled through the cluster are cached in the local registry. Use `list-repos` to verify mirroring is working.
 
 ## Configuration
 

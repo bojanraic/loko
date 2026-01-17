@@ -1,9 +1,12 @@
 """Utility commands: version, check-prerequisites."""
+import os
 import shutil
 import subprocess
 import sys
 from importlib.metadata import metadata
+
 from rich.console import Console
+from rich.prompt import Confirm
 
 
 console = Console()
@@ -22,53 +25,54 @@ def version() -> None:
         sys.exit(1)
 
 
-def _install_via_mise(tool_name: str, mise_tool: str) -> bool:
+def _is_mise_available() -> tuple[bool, bool]:
     """
-    Attempt to install a tool using mise.
-
-    Args:
-        tool_name: Human-readable tool name for display
-        mise_tool: Mise tool identifier (e.g., "kind", "helm")
+    Check if mise is installed and activated.
 
     Returns:
-        True if installation succeeded, False otherwise
+        Tuple of (is_installed, is_activated)
     """
-    console.print(f"   [cyan]Installing {tool_name} via mise...[/cyan]")
+    is_installed = shutil.which("mise") is not None
+    if not is_installed:
+        return False, False
+
+    # Check if mise is activated in the current shell
+    is_activated = bool(os.environ.get("MISE_SHELL") or os.environ.get("__MISE_WATCH"))
+    return is_installed, is_activated
+
+
+def _install_via_mise(tool: str) -> bool:
+    """
+    Install a tool via mise and activate it globally.
+
+    Args:
+        tool: Tool name to install (e.g., "kind", "helm")
+
+    Returns:
+        True if installation succeeded
+    """
     try:
+        # Use 'mise use -g' to install AND activate globally
+        # 'mise install' only downloads but doesn't activate
         result = subprocess.run(
-            ["mise", "install", mise_tool],
+            ["mise", "use", "-g", f"{tool}@latest"],
             capture_output=True,
             text=True,
             timeout=120
         )
-        if result.returncode == 0:
-            console.print(f"   [green]✅ {tool_name} installed successfully[/green]")
-            return True
-        else:
-            console.print(f"   [red]Failed to install {tool_name}: {result.stderr}[/red]")
-            return False
-    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-        console.print(f"   [red]Failed to install {tool_name}: {e}[/red]")
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError):
         return False
 
 
-def check_prerequisites(install: bool = False) -> None:
+def check_prerequisites() -> None:
     """
     Check if all required tools are installed.
-
-    Args:
-        install: If True, attempt to install missing tools via mise
     """
     console.print("[bold blue]Checking prerequisites...[/bold blue]\n")
 
-    # Check if mise is available when install flag is used
-    mise_available = False
-    if install:
-        mise_available = shutil.which("mise") is not None
-        if not mise_available:
-            console.print("[yellow]⚠️  Mise not found. Install mise first to use --install flag:[/yellow]")
-            console.print("   https://mise.jdx.dev/getting-started.html")
-            console.print()
+    # Tools that can be installed via mise
+    mise_installable = {"kind", "helm", "kubectl", "mkcert", "helmfile"}
 
     tools = {
         "docker": {
@@ -76,50 +80,48 @@ def check_prerequisites(install: bool = False) -> None:
             "required": True,
             "description": "Docker (container runtime)",
             "install_url": "https://docs.docker.com/get-docker/",
-            "mise_tool": None  # Docker requires system install
         },
         "kind": {
             "cmd": ["kind", "version"],
             "required": True,
             "description": "Kind (Kubernetes in Docker)",
             "install_url": "https://kind.sigs.k8s.io/docs/user/quick-start/#installation",
-            "mise_tool": "kind"
         },
         "mkcert": {
             "cmd": ["mkcert", "-version"],
             "required": True,
             "description": "mkcert (local certificate authority)",
             "install_url": "https://github.com/FiloSottile/mkcert#installation",
-            "mise_tool": "mkcert"
         },
         "helmfile": {
             "cmd": ["helmfile", "--version"],
-            "required": False,
+            "required": True,
             "description": "Helmfile (declarative Helm releases)",
             "install_url": "https://github.com/helmfile/helmfile#installation",
-            "mise_tool": "helmfile"
         },
         "helm": {
             "cmd": ["helm", "version", "--short"],
             "required": True,
             "description": "Helm (package manager for Kubernetes)",
             "install_url": "https://helm.sh/docs/intro/install/",
-            "mise_tool": "helm"
         },
         "kubectl": {
             "cmd": ["kubectl", "version", "--client"],
-            "required": False,
+            "required": True,
             "description": "kubectl (Kubernetes CLI)",
             "install_url": "https://kubernetes.io/docs/tasks/tools/",
-            "mise_tool": "kubectl"
-        }
+        },
+        "mise": {
+            "cmd": ["mise", "--version"],
+            "required": False,
+            "description": "Mise (tool version manager)",
+            "install_url": "https://mise.jdx.dev/getting-started.html",
+        },
     }
 
+    # Check all tools
     results = {}
-    runtime_found = False
-
     for tool_name, tool_info in tools.items():
-        tool_found = False
         try:
             result = subprocess.run(
                 tool_info["cmd"],
@@ -127,38 +129,62 @@ def check_prerequisites(install: bool = False) -> None:
                 text=True,
                 timeout=5
             )
-            tool_found = result.returncode == 0
+            results[tool_name] = result.returncode == 0
         except (subprocess.TimeoutExpired, FileNotFoundError):
-            tool_found = False
+            results[tool_name] = False
 
-        if tool_found:
-            results[tool_name] = True
-            console.print(f"✅ {tool_info['description']}: [green]installed[/green]")
-            if tool_name in ["docker", "podman"]:
-                runtime_found = True
-        else:
-            # Tool not found - try to install if --install flag is set
-            installed = False
-            if install and mise_available and tool_info.get("mise_tool"):
-                installed = _install_via_mise(tool_info['description'], tool_info['mise_tool'])
-
-            if installed:
-                results[tool_name] = True
-                if tool_name in ["docker", "podman"]:
-                    runtime_found = True
+    # Display results
+    for tool_name, tool_info in tools.items():
+        if results[tool_name]:
+            if tool_info["required"]:
+                console.print(f"✅ {tool_info['description']}: [green]installed[/green]")
             else:
-                results[tool_name] = False
-                if tool_info["required"]:
-                    console.print(f"❌ {tool_info['description']}: [red]not found[/red]")
-                    if not install:
-                        console.print(f"   Install: {tool_info['install_url']}")
-                        if tool_info.get("mise_tool"):
-                            console.print(f"   Or run: [cyan]loko check-prerequisites --install[/cyan]")
-                else:
-                    console.print(f"⚠️  {tool_info['description']}: [yellow]not found (optional)[/yellow]")
+                console.print(f"✅ {tool_info['description']}: [green]installed[/green] [dim](optional)[/dim]")
+        else:
+            if tool_info["required"]:
+                console.print(f"❌ {tool_info['description']}: [red]not found[/red]")
+                console.print(f"   Install: {tool_info['install_url']}")
+            else:
+                console.print(f"⚠️  {tool_info['description']}: [yellow]not found[/yellow] [dim](optional)[/dim]")
+
+    # Check for missing tools that can be installed via mise
+    missing_tools = [
+        name for name, info in tools.items()
+        if not results[name] and info["required"] and name in mise_installable
+    ]
+
+    # If tools are missing and mise is available, offer to install
+    if missing_tools:
+        mise_installed, mise_activated = _is_mise_available()
+
+        if mise_installed and mise_activated:
+            console.print()
+            if Confirm.ask(
+                f"[cyan]Install missing tools via mise?[/cyan] ({', '.join(missing_tools)})",
+                default=True
+            ):
+                console.print()
+                for tool in missing_tools:
+                    console.print(f"Installing {tool}...", end=" ")
+                    if _install_via_mise(tool):
+                        console.print("[green]done[/green]")
+                        results[tool] = True
+                    else:
+                        console.print("[red]failed[/red]")
+        elif mise_installed and not mise_activated:
+            console.print()
+            console.print("[yellow]Tip: Mise is installed but not activated in your shell.[/yellow]")
+            console.print("   Activate it to enable automatic tool installation:")
+            shell = os.environ.get("SHELL", "")
+            if "zsh" in shell:
+                console.print("   [cyan]echo 'eval \"$(mise activate zsh)\"' >> ~/.zshrc && source ~/.zshrc[/cyan]")
+            elif "fish" in shell:
+                console.print("   [cyan]echo 'mise activate fish | source' >> ~/.config/fish/config.fish[/cyan]")
+            else:
+                console.print("   [cyan]echo 'eval \"$(mise activate bash)\"' >> ~/.bashrc && source ~/.bashrc[/cyan]")
 
     # Check if at least one container runtime is available
-    if not runtime_found:
+    if not results.get("docker", False):
         console.print("\n[bold red]Error: No container runtime found![/bold red]")
         console.print("Please install Docker:")
         console.print(f"  - Docker: {tools['docker']['install_url']}")
@@ -166,9 +192,9 @@ def check_prerequisites(install: bool = False) -> None:
     # Summary
     console.print("\n[bold]Summary:[/bold]")
     required_tools = [name for name, info in tools.items() if info["required"]]
-    required_installed = sum(1 for name in required_tools if results.get(name, False))
+    all_required_installed = all(results.get(name, False) for name in required_tools)
 
-    if runtime_found and required_installed >= len([t for t in required_tools if t not in ["docker", "podman"]]) + 1:
+    if all_required_installed:
         console.print("[bold green]✅ All required tools are installed![/bold green]")
 
         # Additional note about NSS/libnss for certificate trust
