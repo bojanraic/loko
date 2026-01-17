@@ -4,7 +4,7 @@ import sys
 from rich.console import Console
 from rich.table import Table
 
-from loko.utils import PASSWORD_PROTECTED_SERVICES, get_dns_container_name
+from loko.utils import PASSWORD_PROTECTED_WORKLOADS, get_dns_container_name
 from loko.validators import ensure_config_file, ensure_docker_running
 from loko.runner import CommandRunner
 from loko.cli_types import ConfigArg
@@ -26,7 +26,7 @@ def status(config_file: ConfigArg = "loko.yaml") -> None:
     runner = CommandRunner(config)
 
     cluster_name = config.environment.name
-    runtime = config.environment.provider.runtime
+    runtime = config.environment.cluster.provider.runtime
 
     try:
         # Check if cluster exists
@@ -55,51 +55,57 @@ def status(config_file: ConfigArg = "loko.yaml") -> None:
                 os.chdir(original_cwd)
 
         # Environment Configuration
-        console.print("[bold]🌍 Environment Configuration:[/bold]")
-        console.print(f"├── Name: {config.environment.name}")
-        console.print(f"├── Base Directory: {base_dir_display}")
-        console.print(f"├── Local Domain: {config.environment.local_domain}")
-        console.print(f"├── Local IP: {config.environment.local_ip}")
-        console.print(f"├── Container Runtime: {config.environment.provider.runtime}")
-        console.print(f"├── Nodes:")
-        console.print(f"│   ├── Control Plane: {config.environment.nodes.servers}")
-        console.print(f"│   ├── Workers: {config.environment.nodes.workers}")
-        console.print(f"│   ├── Allow Control Plane Scheduling: {config.environment.nodes.allow_scheduling_on_control_plane}")
-        console.print(f"│   └── Run Services on Workers Only: {config.environment.run_services_on_workers_only}")
-        console.print(f"└── Service Presets Enabled: {config.environment.use_service_presets}\n")
+        env = config.environment
+        network = env.network
+        cluster = env.cluster
+        nodes = cluster.nodes
+        scheduling = nodes.scheduling
 
-        # Enabled Services
-        console.print("[bold]🔌 Enabled Services:[/bold]")
+        console.print("[bold]🌍 Environment Configuration:[/bold]")
+        console.print(f"├── Name: {env.name}")
+        console.print(f"├── Base Directory: {base_dir_display}")
+        console.print(f"├── Domain: {network.domain}")
+        console.print(f"├── IP: {network.ip}")
+        console.print(f"├── Container Runtime: {cluster.provider.runtime}")
+        console.print(f"├── Nodes:")
+        console.print(f"│   ├── Control Plane: {nodes.servers}")
+        console.print(f"│   ├── Workers: {nodes.workers}")
+        console.print(f"│   ├── Allow Control Plane Workloads: {scheduling.control_plane.allow_workloads}")
+        console.print(f"│   └── Isolate Workloads on Workers: {scheduling.workers.isolate_workloads}")
+        console.print(f"└── Workload Presets Enabled: {env.workloads.use_presets}\n")
+
+        # Enabled Workloads
+        console.print("[bold]🔌 Enabled Workloads:[/bold]")
         sys_enabled = []
         user_enabled = []
 
-        if config.environment.services and config.environment.services.system:
-            for svc in config.environment.services.system:
-                if svc.enabled:
-                    ports = ', '.join(map(str, svc.ports)) if getattr(svc, 'ports', None) else 'none'
-                    sys_enabled.append(f"{svc.name}: {ports}")
+        if env.workloads and env.workloads.system:
+            for wkld in env.workloads.system:
+                if wkld.enabled:
+                    ports = ', '.join(map(str, wkld.ports)) if getattr(wkld, 'ports', None) else 'none'
+                    sys_enabled.append(f"{wkld.name}: {ports}")
 
-        if config.environment.services and config.environment.services.user:
-            for svc in config.environment.services.user:
-                if svc.enabled:
-                    ns = getattr(svc, 'namespace', svc.name)
-                    user_enabled.append(f"{svc.name} (namespace: {ns})")
+        if env.workloads and env.workloads.user:
+            for wkld in env.workloads.user:
+                if wkld.enabled:
+                    ns = getattr(wkld, 'namespace', wkld.name)
+                    user_enabled.append(f"{wkld.name} (namespace: {ns})")
 
         if sys_enabled:
-            console.print("├── System Services (with presets):")
-            for i, svc in enumerate(sys_enabled):
-                console.print(f"│   ├── {svc}")
+            console.print("├── System Workloads (with presets):")
+            for i, wkld in enumerate(sys_enabled):
+                console.print(f"│   ├── {wkld}")
         else:
-            console.print("├── System Services: None enabled")
+            console.print("├── System Workloads: None enabled")
 
         if user_enabled:
-            console.print("├── User Services (custom configuration):")
-            for i, svc in enumerate(user_enabled):
-                console.print(f"│   ├── {svc}")
+            console.print("├── User Workloads (custom configuration):")
+            for i, wkld in enumerate(user_enabled):
+                console.print(f"│   ├── {wkld}")
         else:
-            console.print("├── User Services: None enabled")
+            console.print("├── User Workloads: None enabled")
 
-        console.print(f"└── Registry: {config.environment.registry.name}.{config.environment.local_domain}\n")
+        console.print(f"└── Registry: {env.registry.name}.{network.domain}\n")
 
         # Cluster Info
         console.print("[bold]🏢 Cluster Information:[/bold]")
@@ -120,7 +126,7 @@ def status(config_file: ConfigArg = "loko.yaml") -> None:
         console.print("[bold]🔍 DNS Service:[/bold]")
         dns_container = get_dns_container_name(cluster_name)
         dns_status = runner.list_containers(name_filter=dns_container, format_expr="{{.Names}}\t{{.Status}}", check=False)
-        resolver_port = config.environment.local_dns_port
+        resolver_port = network.dns_port
         if dns_status:
             name, status_str = dns_status[0].split('\t', 1)
             console.print(f"├── Container: {name}")
@@ -161,39 +167,39 @@ def status(config_file: ConfigArg = "loko.yaml") -> None:
         console.print("[bold]🔗 Quick Reference - Service Access:[/bold]")
 
         # Determine the app domain
-        if config.environment.use_apps_subdomain:
-            app_domain = f"{config.environment.apps_subdomain}.{config.environment.local_domain}"
+        if network.subdomain.enabled:
+            app_domain = f"{network.subdomain.value}.{network.domain}"
         else:
-            app_domain = config.environment.local_domain
+            app_domain = network.domain
 
-        # Service DNS Names
-        enabled_services = [svc for svc in config.environment.services.system if svc.enabled]
-        if enabled_services:
+        # Workload DNS Names
+        enabled_workloads = [wkld for wkld in env.workloads.system if wkld.enabled]
+        if enabled_workloads:
             table = Table(show_header=True, header_style="bold magenta", box=None, padding=(0, 2))
-            table.add_column("Service", style="cyan")
+            table.add_column("Workload", style="cyan")
             table.add_column("DNS Name", style="yellow")
             table.add_column("Ports", style="green")
 
-            for svc in enabled_services:
-                dns_name = f"{svc.name}.{config.environment.local_domain}"
-                ports = ", ".join(str(p) for p in svc.ports) if svc.ports else "N/A"
-                table.add_row(svc.name, dns_name, ports)
+            for wkld in enabled_workloads:
+                dns_name = f"{wkld.name}.{network.domain}"
+                ports = ", ".join(str(p) for p in wkld.ports) if wkld.ports else "N/A"
+                table.add_row(wkld.name, dns_name, ports)
 
             console.print(table)
 
-        password_services_enabled = {
-            svc.name
-            for svc in (config.environment.services.system + config.environment.services.user)
-            if svc.enabled and svc.name in PASSWORD_PROTECTED_SERVICES
+        password_workloads_enabled = {
+            wkld.name
+            for wkld in (env.workloads.system + env.workloads.user)
+            if wkld.enabled and wkld.name in PASSWORD_PROTECTED_WORKLOADS
         }
 
-        if password_services_enabled:
-            secrets_file = os.path.join(os.path.expandvars(config.environment.base_dir), config.environment.name, 'service-secrets.txt')
-            console.print(f"├── Service Credentials: [yellow]{secrets_file}[/yellow]")
+        if password_workloads_enabled:
+            secrets_file = os.path.join(os.path.expandvars(env.base_dir), env.name, 'workload-secrets.txt')
+            console.print(f"├── Workload Credentials: [yellow]{secrets_file}[/yellow]")
 
         # App deployment info
-        kube_context = f"kind-{config.environment.name}"
-        registry_host = f"{config.environment.registry.name}.{config.environment.local_domain}"
+        kube_context = f"kind-{env.name}"
+        registry_host = f"{env.registry.name}.{network.domain}"
         app_domain_display = f"https://<app-name>.{app_domain}"
 
         console.print(f"├── Kubeconfig Context: [yellow]{kube_context}[/yellow]")
@@ -218,7 +224,7 @@ def validate(config_file: ConfigArg = "loko.yaml") -> None:
     runner = CommandRunner(config)
 
     cluster_name = config.environment.name
-    runtime = config.environment.provider.runtime
+    runtime = config.environment.cluster.provider.runtime
 
     validation_passed = True
 

@@ -3,7 +3,7 @@ helmDefaults:
   wait: true
   timeout: 900
   atomic: true
-# Dynamic repositories from services configuration
+# Dynamic repositories from workloads configuration
 repositories:
   # Core repositories for internal components
   - name: traefik
@@ -15,7 +15,7 @@ repositories:
     url: https://kubernetes-sigs.github.io/metrics-server/
   {% endif %}
 
-  # Dynamic repositories from services
+  # Dynamic repositories from workloads
   {% for repo_name, repo_url in helm_repositories.items() %}
   - name: {{ repo_name }}
     url: {{ repo_url }}
@@ -32,7 +32,7 @@ releases:
     values:
       - deployment:
           replicas: 1
-        {% if nodes.get('internal-components-on-control-plane', true) %}
+        {% if scheduling.control_plane.isolate_internal_components %}
         nodeSelector:
           ingress-ready: "true"
         tolerations:
@@ -69,8 +69,8 @@ releases:
               options: ""
               certResolver: ""
               domains: []
-          {% for service in system_services if service.enabled %}
-          {% for port in service.ports %}
+          {% for workload in system_workloads if workload.enabled %}
+          {% for port in workload.ports %}
           tcp{{ port }}:
             port: {{ port }}
             exposedPort: {{ port }}
@@ -125,7 +125,7 @@ releases:
       - args:
           - --kubelet-insecure-tls
           - --kubelet-preferred-address-types=InternalIP
-        {% if nodes.get('internal-components-on-control-plane', true) %}
+        {% if scheduling.control_plane.isolate_internal_components %}
         nodeSelector:
           ingress-ready: "true"
         tolerations:
@@ -280,7 +280,7 @@ releases:
             }
 
         # Node scheduling (control plane placement)
-        {% if nodes.get('internal-components-on-control-plane', true) %}
+        {% if scheduling.control_plane.isolate_internal_components %}
         nodeSelector:
           ingress-ready: "true"
         tolerations:
@@ -300,24 +300,24 @@ releases:
             effect: NoSchedule
         {% endif %}
 
-  # System service releases (with presets and port management)
-  {% for service in system_services if service.enabled %}
-  - name: {{ service.name }}
+  # System workload releases (with presets and port management)
+  {% for workload in system_workloads if workload.enabled %}
+  - name: {{ workload.name }}
     labels:
-      name: {{ service.name }}
-    namespace: {{ service.namespace | default(service.name) }}
-    chart: {{ service.config.chart }}
-    version: {{ service.config.version }}
+      name: {{ workload.name }}
+    namespace: {{ workload.namespace | default(workload.name) }}
+    chart: {{ workload.config.chart }}
+    version: {{ workload.config.version }}
     needs:
-      # ensure traefik and registry are installed before installing {{ service.name }}
+      # ensure traefik and registry are installed before installing {{ workload.name }}
       - traefik/traefik
       - registry/registry
     values:
-      - {{ service.base_values | to_yaml | indent(8) | trim }}
-      {% if service.custom_values %}
-      - {{ service.custom_values | to_yaml | indent(8) | trim }}
+      - {{ workload.base_values | to_yaml | indent(8) | trim }}
+      {% if workload.custom_values %}
+      - {{ workload.custom_values | to_yaml | indent(8) | trim }}
       {% endif %}
-      {% if run_services_on_workers_only and nodes.workers > 0 %}
+      {% if run_workloads_on_workers_only and nodes.workers > 0 %}
       - nodeSelector:
           node-role.kubernetes.io/worker: "true"
         tolerations:
@@ -328,21 +328,21 @@ releases:
       {% endif %}
   {% endfor %}
 
-  {% if user_services | selectattr('enabled') | list | length > 0 %}
-  # User service releases (without presets - user provides ports and complete values)
-  {% for service in user_services if service.enabled %}
-  - name: {{ service.name }}
+  {% if user_workloads | selectattr('enabled') | list | length > 0 %}
+  # User workload releases (without presets - user provides ports and complete values)
+  {% for workload in user_workloads if workload.enabled %}
+  - name: {{ workload.name }}
     labels:
-      name: {{ service.name }}
-    namespace: {{ service.namespace | default(service.name) }}
-    chart: {{ service.config.chart }}
-    version: {{ service.config.version }}
+      name: {{ workload.name }}
+    namespace: {{ workload.namespace | default(workload.name) }}
+    chart: {{ workload.config.chart }}
+    version: {{ workload.config.version }}
     needs:
       - traefik/traefik
       - registry/registry
     values:
-      - {{ service.base_values | to_yaml | indent(8) | trim }}
-      {% if run_services_on_workers_only and nodes.workers > 0 %}
+      - {{ workload.base_values | to_yaml | indent(8) | trim }}
+      {% if run_workloads_on_workers_only and nodes.workers > 0 %}
       - nodeSelector:
           node-role.kubernetes.io/worker: "true"
         tolerations:

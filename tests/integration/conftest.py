@@ -33,7 +33,7 @@ def test_config_file(integration_workspace):
     """Generate a test config file in the workspace."""
     config_path = integration_workspace / "test-config.yaml"
     result = subprocess.run(
-        ["loko", "generate-config", "--output", str(config_path), "--force"],
+        ["loko", "config", "generate", "--output", str(config_path), "--force"],
         capture_output=True,
         text=True,
         cwd=integration_workspace

@@ -3,7 +3,7 @@ import os
 from unittest.mock import MagicMock, patch, call
 from pathlib import Path
 from loko.generator import ConfigGenerator, load_presets
-from loko.config import RootConfig
+from loko.config import RootConfig, RegistryMirrorSource
 
 @pytest.fixture
 def sample_config():
@@ -11,30 +11,51 @@ def sample_config():
         "environment": {
             "name": "test-env",
             "base-dir": "/tmp/loko",
-            "local-ip": "127.0.0.1",
-            "local-domain": "loko.local",
-            "local-lb-ports": [80, 443],
-            "internal-components": [],
-            "provider": {
-                "name": "kind",
-                "runtime": "docker"
+            "cluster": {
+                "provider": {
+                    "name": "kind",
+                    "runtime": "docker"
+                },
+                "kubernetes": {
+                    "api-port": 6443,
+                    "image": "kindest/node",
+                    "tag": "v1.27.3"
+                },
+                "nodes": {
+                    "servers": 1,
+                    "workers": 2,
+                    "scheduling": {
+                        "control-plane": {
+                            "allow-workloads": True,
+                            "isolate-internal-components": True
+                        },
+                        "workers": {
+                            "isolate-workloads": False
+                        }
+                    }
+                }
             },
-            "kubernetes": {
-                "api-port": 6443,
-                "image": "kindest/node",
-                "tag": "v1.27.3"
+            "network": {
+                "ip": "127.0.0.1",
+                "domain": "loko.local",
+                "dns-port": 53,
+                "subdomain": {
+                    "enabled": True,
+                    "value": "apps"
+                },
+                "lb-ports": [80, 443]
             },
-            "nodes": {
-                "servers": 1,
-                "workers": 2,
-                "allow-scheduling-on-control-plane": True,
-                "internal-components-on-control-plane": True
+            "internal-components": {
+                "traefik": {"version": "37.3.0"},
+                "zot": {"version": "0.1.66"},
+                "dnsmasq": {"version": "2.90"},
+                "metrics-server": {"version": "3.13.0", "enabled": False}
             },
             "registry": {
                 "name": "registry",
                 "storage": {"size": "10Gi"}
             },
-            "services": {
+            "workloads": {
                 "system": [],
                 "user": []
             }
@@ -43,36 +64,57 @@ def sample_config():
 
 
 @pytest.fixture
-def config_with_services():
-    """Config with system services."""
+def config_with_workloads():
+    """Config with system workloads."""
     return RootConfig(**{
         "environment": {
             "name": "test-env",
             "base-dir": "/tmp/loko",
-            "local-ip": "127.0.0.1",
-            "local-domain": "loko.local",
-            "local-lb-ports": [80, 443],
-            "internal-components": [{"traefik": "37.3.0"}],
-            "provider": {
-                "name": "kind",
-                "runtime": "docker"
+            "cluster": {
+                "provider": {
+                    "name": "kind",
+                    "runtime": "docker"
+                },
+                "kubernetes": {
+                    "api-port": 6443,
+                    "image": "kindest/node",
+                    "tag": "v1.27.3"
+                },
+                "nodes": {
+                    "servers": 1,
+                    "workers": 2,
+                    "scheduling": {
+                        "control-plane": {
+                            "allow-workloads": True,
+                            "isolate-internal-components": True
+                        },
+                        "workers": {
+                            "isolate-workloads": False
+                        }
+                    }
+                }
             },
-            "kubernetes": {
-                "api-port": 6443,
-                "image": "kindest/node",
-                "tag": "v1.27.3"
+            "network": {
+                "ip": "127.0.0.1",
+                "domain": "loko.local",
+                "dns-port": 53,
+                "subdomain": {
+                    "enabled": True,
+                    "value": "apps"
+                },
+                "lb-ports": [80, 443]
             },
-            "nodes": {
-                "servers": 1,
-                "workers": 2,
-                "allow-scheduling-on-control-plane": True,
-                "internal-components-on-control-plane": True
+            "internal-components": {
+                "traefik": {"version": "37.3.0"},
+                "zot": {"version": "0.1.66"},
+                "dnsmasq": {"version": "2.90"},
+                "metrics-server": {"version": "3.13.0", "enabled": False}
             },
             "registry": {
                 "name": "registry",
                 "storage": {"size": "10Gi"}
             },
-            "services": {
+            "workloads": {
                 "system": [],
                 "user": []
             }
@@ -130,7 +172,7 @@ def test_generate_random_password_charset(sample_config):
 
 
 def test_load_presets_success():
-    """Test loading service presets from templates directory."""
+    """Test loading workload presets from templates directory."""
     # Use actual templates directory
     template_dir = Path(__file__).parent.parent / "loko" / "templates"
     if template_dir.exists():
@@ -208,7 +250,7 @@ def test_generate_chart_auth_config_valkey(sample_config):
 
 
 def test_generate_chart_auth_config_unknown(sample_config):
-    """Test auth config for unknown service returns empty dict."""
+    """Test auth config for unknown workload returns empty dict."""
     generator = ConfigGenerator(sample_config, "config.yaml")
     auth_config = generator._generate_chart_auth_config("unknown", "unknown/chart")
 
@@ -229,14 +271,14 @@ def test_prepare_context_basic(mock_load_presets, sample_config):
 
 
 @patch("loko.generator.load_presets")
-def test_prepare_context_with_services(mock_load_presets, config_with_services):
-    """Test context preparation with services."""
+def test_prepare_context_with_workloads(mock_load_presets, config_with_workloads):
+    """Test context preparation with workloads."""
     mock_load_presets.return_value = (
         {"mysql": 3306, "postgres": 5432},
         {"mysql": {"image": {"pullPolicy": "IfNotPresent"}}}
     )
 
-    generator = ConfigGenerator(config_with_services, "config.yaml")
+    generator = ConfigGenerator(config_with_workloads, "config.yaml")
     context = generator.prepare_context()
 
     # Check that context includes basic fields
@@ -286,24 +328,27 @@ def test_to_yaml_filter(sample_config):
 def test_generate_mirroring_configs(sample_config, temp_dir):
     """Test that multiple hosts.toml files are generated when mirroring is enabled."""
     sample_config.environment.registry.mirroring.enabled = True
-    sample_config.environment.registry.mirroring.docker_hub = True
-    sample_config.environment.local_domain = "loko.local"
+    # Set docker_hub source to enabled (it's enabled by default)
+    sample_config.environment.registry.mirroring.sources = [
+        RegistryMirrorSource(name='docker_hub', enabled=True),
+    ]
+    sample_config.environment.network.domain = "loko.local"
     sample_config.environment.registry.name = "registry"
-    
-    # Use a real ConfigGenerator but mock the file writing if needed, 
+
+    # Use a real ConfigGenerator but mock the file writing if needed,
     # or just let it write to temp_dir
     generator = ConfigGenerator(sample_config, "config.yaml")
     generator.k8s_dir = temp_dir
-    
+
     # We need to ensure the templates are picked up correctly
     generator.generate_configs()
-    
+
     containerd_dir = Path(temp_dir) / "config" / "containerd"
     assert containerd_dir.exists()
-    
+
     # Local registry
     assert (containerd_dir / "registry.loko.local" / "hosts.toml").exists()
-    
+
     # Docker Hub mirror
     assert (containerd_dir / "docker.io" / "hosts.toml").exists()
     with open(containerd_dir / "docker.io" / "hosts.toml") as f:

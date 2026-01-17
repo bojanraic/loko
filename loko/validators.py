@@ -21,7 +21,7 @@ Used by CLI commands in loko/cli/commands/:
 - ensure_docker_running() before commands that use Docker (create, start, stop, etc.)
 - ensure_base_dir_writable() before commands that write to base directory
 - ensure_single_server_cluster() before commands that create/modify clusters
-- ensure_ports_available() before cluster creation to check DNS, LB, and service ports
+- ensure_ports_available() before cluster creation to check DNS, LB, and workload ports
 
 Example usage:
     @app.command()
@@ -29,7 +29,7 @@ Example usage:
         ensure_config_file(config)
         ensure_docker_running()
         config = get_config(config)
-        ensure_single_server_cluster(config.environment.nodes.servers)
+        ensure_single_server_cluster(config.environment.cluster.nodes.servers)
         ensure_ports_available(config)
         # ... rest of implementation
 """
@@ -93,7 +93,7 @@ def ensure_config_file(config_path: str):
         console.print(f"[cyan]  1. Specify an existing config file:[/cyan]")
         console.print(f"[cyan]     loko <command> --config <path>[/cyan]")
         console.print(f"[cyan]  2. Generate a new config file:[/cyan]")
-        console.print(f"[cyan]     loko generate-config[/cyan]")
+        console.print(f"[cyan]     loko config generate[/cyan]")
         sys.exit(1)
 
 
@@ -117,13 +117,14 @@ def ensure_single_server_cluster(servers: int):
         console.print(f"[bold red]❌ Multi-control-plane clusters are not supported yet.[/bold red]")
         console.print(f"[yellow]You specified {servers} control plane servers, but only 1 is currently supported.[/yellow]")
         console.print(f"\n[yellow]Please update your configuration:[/yellow]")
-        console.print(f"[cyan]  nodes:[/cyan]")
-        console.print(f"[cyan]    servers: 1[/cyan]")
+        console.print(f"[cyan]  cluster:[/cyan]")
+        console.print(f"[cyan]    nodes:[/cyan]")
+        console.print(f"[cyan]      servers: 1[/cyan]")
         sys.exit(1)
 
 
 def check_ports_available(config) -> Tuple[bool, Dict[str, List[int]]]:
-    """Check if all required ports (DNS, LB, and service ports) are available.
+    """Check if all required ports (DNS, LB, and workload ports) are available.
 
     Returns:
         Tuple of (all_available, conflicts) where conflicts is a dict mapping
@@ -137,27 +138,27 @@ def check_ports_available(config) -> Tuple[bool, Dict[str, List[int]]]:
     env = config.environment
     conflicts: Dict[str, List[int]] = {}
 
-    # Check DNS port
-    dns_port = env.local_dns_port
+    # Check DNS port (now under network.dns_port)
+    dns_port = env.network.dns_port
     if _is_port_in_use(dns_port):
         conflicts.setdefault('dns', []).append(dns_port)
 
-    # Check load balancer ports
-    for port in env.local_lb_ports:
+    # Check load balancer ports (now under network.lb_ports)
+    for port in env.network.lb_ports:
         if _is_port_in_use(port):
             conflicts.setdefault('load_balancer', []).append(port)
 
-    # Check enabled service ports
-    enabled_services = (
-        [svc for svc in env.services.system if svc.enabled] +
-        [svc for svc in env.services.user if svc.enabled]
+    # Check enabled workload ports
+    enabled_workloads = (
+        [wkld for wkld in env.workloads.system if wkld.enabled] +
+        [wkld for wkld in env.workloads.user if wkld.enabled]
     )
 
-    for service in enabled_services:
-        if service.ports:
-            for port in service.ports:
+    for workload in enabled_workloads:
+        if workload.ports:
+            for port in workload.ports:
                 if _is_port_in_use(port):
-                    conflicts.setdefault('services', []).append(port)
+                    conflicts.setdefault('workloads', []).append(port)
 
     return len(conflicts) == 0, conflicts
 
@@ -193,15 +194,15 @@ def ensure_ports_available(config):
                 console.print(f"  • Port {port}")
             console.print(f"[dim]  These ports are used for ingress traffic routing[/dim]\n")
 
-        if 'services' in conflicts:
-            console.print(f"[bold cyan]Service Ports:[/bold cyan]")
-            for port in conflicts['services']:
+        if 'workloads' in conflicts:
+            console.print(f"[bold cyan]Workload Ports:[/bold cyan]")
+            for port in conflicts['workloads']:
                 console.print(f"  • Port {port}")
-            console.print(f"[dim]  These ports are mapped to enabled services[/dim]\n")
+            console.print(f"[dim]  These ports are mapped to enabled workloads[/dim]\n")
 
         console.print(f"[yellow]Solutions:[/yellow]")
-        console.print(f"[cyan]  1. Stop the services using these ports[/cyan]")
-        console.print(f"[cyan]  2. Disable the conflicting services in your loko.yaml config[/cyan]")
+        console.print(f"[cyan]  1. Stop the processes using these ports[/cyan]")
+        console.print(f"[cyan]  2. Disable the conflicting workloads in your loko.yaml config[/cyan]")
         console.print(f"[cyan]  3. Change port mappings in your loko.yaml config[/cyan]")
         console.print(f"\n[yellow]To find what's using a port:[/yellow]")
         console.print(f"[cyan]  • On macOS: sudo lsof -i :<port>[/cyan]")

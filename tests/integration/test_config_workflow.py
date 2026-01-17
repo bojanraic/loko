@@ -11,17 +11,17 @@ from pathlib import Path
 
 @pytest.mark.integration
 def test_generate_config_creates_valid_yaml(integration_workspace, loko_cli):
-    """Test: generate-config creates valid YAML file."""
+    """Test: config generate creates valid YAML file."""
     config_path = integration_workspace / "generated-config.yaml"
 
     result = subprocess.run(
-        [loko_cli, "generate-config", "--output", str(config_path), "--force"],
+        [loko_cli, "config", "generate", "--output", str(config_path), "--force"],
         capture_output=True,
         text=True,
         cwd=integration_workspace
     )
 
-    assert result.returncode == 0, f"generate-config failed: {result.stderr}"
+    assert result.returncode == 0, f"config generate failed: {result.stderr}"
     assert config_path.exists(), "Config file was not created"
 
     # Validate YAML structure
@@ -31,18 +31,19 @@ def test_generate_config_creates_valid_yaml(integration_workspace, loko_cli):
     assert config is not None, "Config is empty"
     assert "environment" in config, "Missing 'environment' key"
     assert "name" in config["environment"], "Missing environment name"
-    assert "provider" in config["environment"], "Missing provider config"
+    assert "cluster" in config["environment"], "Missing cluster config"
+    assert "provider" in config["environment"]["cluster"], "Missing provider config"
 
 
 @pytest.mark.integration
 def test_generate_config_with_custom_output_path(integration_workspace, loko_cli):
-    """Test: generate-config with custom output path."""
+    """Test: config generate with custom output path."""
     custom_dir = integration_workspace / "configs"
     custom_dir.mkdir()
     config_path = custom_dir / "my-config.yaml"
 
     result = subprocess.run(
-        [loko_cli, "generate-config",
+        [loko_cli, "config", "generate",
          "--output", str(config_path),
          "--force"],
         capture_output=True,
@@ -66,7 +67,7 @@ def test_generate_config_yaml_structure(integration_workspace, loko_cli):
     config_path = integration_workspace / "structure-test-config.yaml"
 
     result = subprocess.run(
-        [loko_cli, "generate-config",
+        [loko_cli, "config", "generate",
          "--output", str(config_path),
          "--force"],
         capture_output=True,
@@ -81,22 +82,22 @@ def test_generate_config_yaml_structure(integration_workspace, loko_cli):
         config = yaml.safe_load(f)
 
     # Verify full structure (using actual defaults: dev.me domain, dev-me name)
-    assert config["environment"]["local-domain"] == "dev.me"
+    assert config["environment"]["network"]["domain"] == "dev.me"
     assert config["environment"]["name"] == "dev-me"
-    assert config["environment"]["nodes"]["workers"] == 1  # Default is 1 worker
-    assert config["environment"]["nodes"]["servers"] == 1
-    assert "kubernetes" in config["environment"]
-    assert "services" in config["environment"]
+    assert config["environment"]["cluster"]["nodes"]["workers"] == 1  # Default is 1 worker
+    assert config["environment"]["cluster"]["nodes"]["servers"] == 1
+    assert "kubernetes" in config["environment"]["cluster"]
+    assert "workloads" in config["environment"]
 
 
 @pytest.mark.integration
 def test_generate_config_refuses_overwrite_without_force(integration_workspace, loko_cli):
-    """Test: generate-config fails without --force if file exists."""
+    """Test: config generate fails without --force if file exists."""
     config_path = integration_workspace / "existing-config.yaml"
 
     # Create initial config
     result1 = subprocess.run(
-        [loko_cli, "generate-config", "--output", str(config_path), "--force"],
+        [loko_cli, "config", "generate", "--output", str(config_path), "--force"],
         capture_output=True,
         text=True,
         cwd=integration_workspace
@@ -105,7 +106,7 @@ def test_generate_config_refuses_overwrite_without_force(integration_workspace, 
 
     # Try to overwrite without --force
     result2 = subprocess.run(
-        [loko_cli, "generate-config", "--output", str(config_path)],
+        [loko_cli, "config", "generate", "--output", str(config_path)],
         capture_output=True,
         text=True,
         cwd=integration_workspace

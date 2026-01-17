@@ -12,25 +12,62 @@ A Python CLI utility to manage local Kubernetes environments with Kind, providin
 
 ## Features
 
-- 🚀 **Easy Setup**: Initialize local Kubernetes clusters with a single command
-- 🔄 **Smart Version Management**: Upgrade component versions using Renovate-style comments
-- 💾 **Automatic Backups**: Config files are automatically backed up before upgrades
-- 🎨 **Custom Templates**: Use your own Jinja2 templates for configuration generation
-- ⚙️ **Extensive CLI Overrides**: Override any configuration value via command-line flags
-- 📦 **Built-in Local Registry**: Local container registry with TLS support
-- 🔒 **Automatic HTTPS**: Built-in certificate management with mkcert
-- 🌐 **Local DNS**: Automatic DNS configuration for local development
-- 📈 **Metrics & Monitoring**: Built-in metrics-server for resource monitoring and HPA support
-- 📊 **Comprehensive Status**: Detailed view of cluster resources with `loko status`
-- 🧩 **Granular Service Management**: List, deploy, and undeploy individual services with `loko service`
-- 🎯 **Advanced Node Scheduling**: Flexible node labeling and workload placement
-- 🔄 **Registry Mirroring**: Automatic caching/mirroring of external registries (Docker Hub, Quay, etc.)
-- 🔧 **Service Presets**: Pre-configured settings for common services (MySQL, PostgreSQL, Valkey, etc.)
-- 🛠️ **Helm-based Deployment**: Deploy services from public repositories (groundhog2k, etc.)
-- 🗂️ **Centralized Helm Repos**: Define repositories once, reference everywhere
-- 🔑 **Automatic Secrets Management**: Automatically generate, fetch and save service credentials with deduplication
-- 🔍 **Port Availability Checking**: Pre-flight validation ensures all required ports are available before cluster creation
-- ⚡ **Smart Error Handling**: Clear, actionable error messages guide you to solutions
+- **Easy Setup**: Initialize local Kubernetes clusters with a single command
+- **Smart Version Management**: Upgrade component versions using loko-updater comments
+- **Automatic Backups**: Config files are automatically backed up before upgrades
+- **Custom Templates**: Use your own Jinja2 templates for configuration generation
+- **Extensive CLI Overrides**: Override any configuration value via command-line flags
+- **Built-in Local Registry**: Local container registry with TLS support
+- **Automatic HTTPS**: Built-in certificate management with mkcert
+- **Local DNS**: Automatic DNS configuration for local development
+- **Metrics & Monitoring**: Built-in metrics-server for resource monitoring and HPA support
+- **Comprehensive Status**: Detailed view of cluster resources with `loko status`
+- **Granular Workload Management**: List, deploy, and undeploy individual workloads with `loko workload`
+- **Advanced Node Scheduling**: Flexible node labeling and workload placement
+- **Registry Mirroring**: Automatic caching/mirroring of external registries (Docker Hub, Quay, etc.)
+- **Workload Presets**: Pre-configured settings for common workloads (MySQL, PostgreSQL, Valkey, etc.)
+- **Helm-based Deployment**: Deploy workloads from public repositories (groundhog2k, etc.)
+- **Centralized Helm Repos**: Define repositories once, reference everywhere
+- **Automatic Secrets Management**: Automatically generate, fetch and save workload credentials with deduplication
+- **Port Availability Checking**: Pre-flight validation ensures all required ports are available before cluster creation
+- **Smart Error Handling**: Clear, actionable error messages guide you to solutions
+
+## Breaking Changes in v0.1.0
+
+> **Important for existing users**: The configuration schema has been restructured for better organization and clarity. If you have an existing `loko.yaml`, you'll need to regenerate it.
+
+### Migration Steps
+
+1. **Backup your existing config** (if you have customizations):
+   ```bash
+   cp loko.yaml loko.yaml.backup
+   ```
+
+2. **Regenerate the config**:
+   ```bash
+   loko config generate --force
+   ```
+
+3. **Re-apply your customizations** to the new config structure.
+
+### Key Schema Changes
+
+| Old Path | New Path |
+|----------|----------|
+| `local-ip` | `network.ip` |
+| `local-domain` | `network.domain` |
+| `local-dns-port` | `network.dns-port` |
+| `local-lb-ports` | `network.lb-ports` |
+| `use-apps-subdomain` | `network.subdomain.enabled` |
+| `apps-subdomain` | `network.subdomain.value` |
+| `provider` | `cluster.provider` |
+| `kubernetes` | `cluster.kubernetes` |
+| `nodes` | `cluster.nodes` |
+| `nodes.allow-scheduling-on-control-plane` | `cluster.nodes.scheduling.control-plane.allow-workloads` |
+| `nodes.internal-components-on-control-plane` | `cluster.nodes.scheduling.control-plane.isolate-internal-components` |
+| `run-workloads-on-workers-only` | `cluster.nodes.scheduling.workers.isolate-workloads` |
+| `internal-components` (list) | `internal-components` (dict with named components) |
+| `helm-repositories` | `workloads.helm-repositories` |
 
 ## Prerequisites
 
@@ -39,7 +76,7 @@ A Python CLI utility to manage local Kubernetes environments with Kind, providin
 - [Kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
 - [mkcert](https://github.com/FiloSottile/mkcert#installation) (for HTTPS certificates)
 - [Helm](https://helm.sh/docs/intro/install/)
-- [Helmfile](https://github.com/helmfile/helmfile#installation) (optional, for service deployment)
+- [Helmfile](https://github.com/helmfile/helmfile#installation) (optional, for workload deployment)
 - (optional) nss (for macOS) or libnss3-tools (for Linux) - needed for Firefox to trust mkcert certificates
 
 ## Installation
@@ -82,7 +119,7 @@ uv run loko --help
 
 2. Generate a default configuration:
    ```bash
-   loko generate-config
+   loko config generate
    ```
 
 3. Initialize your environment:
@@ -107,11 +144,11 @@ Watch Loko in action - see the complete workflow from installation to cluster va
 - Installing loko
 - Generating a default configuration with auto-detected IP
 - Creating a local Kubernetes cluster with Kind
-- Deploying services (Traefik, container registry, PostgreSQL) with Helm
+- Deploying workloads (Traefik, container registry, PostgreSQL) with Helm
 - Validating the cluster setup
 - Checking environment status
 - Upgrading component versions
-- Viewing service secrets & connecting to PostgreSQL and test application
+- Viewing workload secrets & connecting to PostgreSQL and test application
 - Stopping and starting environment
 - Installing shell completion (via `--install-completion`)
 
@@ -132,16 +169,18 @@ Watch Loko in action - see the complete workflow from installation to cluster va
 - `loko check-prerequisites` - Check if required tools are installed
 
 ### Configuration & Secrets
-- `loko generate-config` - Generate default loko.yaml
-- `loko config upgrade` - Upgrade component versions using Renovate comments
+- `loko config generate` - Generate default loko.yaml with auto-detected local IP
+- `loko config detect-ip` - Detect and display the local IP address
+- `loko config validate` - Validate configuration file structure and values
+- `loko config port-check` - Check availability of all configured ports
+- `loko config upgrade` - Upgrade component versions using loko-updater comments
 - `loko config helm-repo-add` - Add Helm repositories to config
 - `loko config helm-repo-remove` - Remove Helm repositories from config
-- `loko service list` - List enabled services and their status
-- `loko service deploy` - Deploy all or specific services
-- `loko service undeploy` - Undeploy all or specific services
-- `loko secret fetch` - Fetch service credentials from cluster
-- `loko secret show` - Display saved service credentials
-- `loko config presets` - View available service presets (coming soon)
+- `loko workload list` - List workloads and their status (with filtering options)
+- `loko workload deploy` - Deploy all or specific workloads
+- `loko workload undeploy` - Undeploy all or specific workloads
+- `loko secret fetch` - Fetch workload credentials from cluster
+- `loko secret show` - Display saved workload credentials
 
 ## Checking Cluster Status
 
@@ -160,32 +199,40 @@ This will display:
 
 ## Version Management & Upgrades
 
-Loko uses Renovate-style comments in your configuration file to track and upgrade component versions. This approach allows you to:
+> **Migration Note:** If you're upgrading from an earlier version of Loko that used `# renovate:` comments, you'll need to update them to `# loko-updater:`. A simple find-and-replace in your `loko.yaml` will do:
+> ```bash
+> sed -i '' 's/# renovate:/# loko-updater:/g' loko.yaml  # macOS
+> sed -i 's/# renovate:/# loko-updater:/g' loko.yaml     # Linux
+> ```
+
+Loko uses loko-updater comments in your configuration file to track and upgrade component versions. This approach allows you to:
 - Keep component versions up-to-date
 - Track version sources directly in your config
 - Automatically query Docker Hub and Helm repositories for latest versions
 
 ### How It Works
 
-Add Renovate comments above the version fields in your `loko.yaml`:
+Add loko-updater comments above the version fields in your `loko.yaml`:
 
 ```yaml
-kubernetes:
-  image: kindest/node
-  # renovate: datasource=docker depName=kindest/node
-  tag: v1.34.0
+cluster:
+  kubernetes:
+    image: kindest/node
+    # loko-updater: datasource=docker depName=kindest/node
+    tag: v1.35.0
 
 internal-components:
-  # renovate: datasource=helm depName=traefik repositoryUrl=https://traefik.github.io/charts
-  - traefik: "37.3.0"
+  traefik:
+    # loko-updater: datasource=helm depName=traefik repositoryUrl=https://traefik.github.io/charts
+    version: "38.0.2"
 
-services:
+workloads:
   system:
     - name: mysql
       config:
         chart: groundhog2k/mysql
-        # renovate: datasource=helm depName=mysql repositoryUrl=https://groundhog2k.github.io/helm-charts
-        version: 3.0.7
+        # loko-updater: datasource=helm depName=mysql repositoryUrl=https://groundhog2k.github.io/helm-charts
+        version: 3.0.8
 ```
 
 ### Supported Datasources
@@ -200,31 +247,27 @@ loko config upgrade
 ```
 
 This will:
-1. 🔍 Scan your config for Renovate comments
-2. 🌐 Query each datasource for the latest version (in parallel)
-3. 💾 Create a backup (`loko-prev.yaml`)
-4. ✅ Update versions in place
-5. 📋 Show a summary of changes
+1. Scan your config for loko-updater comments
+2. Query each datasource for the latest version (in parallel)
+3. Create a backup (`loko-prev.yaml`)
+4. Update versions in place
+5. Show a summary of changes
 
-**Performance:** Helm repository checks are performed in parallel, significantly reducing upgrade time when checking multiple repositories. For example, checking 5 repositories completes ~1.3x faster than sequential checks.
+**Performance:** Helm repository checks are performed in parallel, significantly reducing upgrade time when checking multiple repositories.
 
 Example output:
 ```
 Upgrading component versions...
 
-🔍 Checking kindest/node (docker)...
-🔍 Checking traefik (helm)...
-🔍 Checking mysql (helm)...
-
 Updates found:
-  kindest/node: v1.32.0 → v1.34.0
-  traefik: 31.2.0 → 37.3.0
-  mysql: 3.0.5 → 3.0.7
+  kindest/node: v1.34.0 → v1.35.0
+  traefik: 37.3.0 → 38.0.2
+  mysql: 3.0.7 → 3.0.8
 
-💾 Backup created: loko-prev.yaml
-✅ Updated 3 version(s) in loko.yaml
+Backup created: loko-prev.yaml
+Updated 3 version(s) in loko.yaml
 
-⏱️  Total fetch time: 8.18s (Helm ops: 8.18s)
+Total fetch time: 8.18s (Helm ops: 8.18s)
 ```
 
 ### Restoring from Backup
@@ -237,14 +280,9 @@ mv loko-prev.yaml loko.yaml
 
 ## Managing Helm Repositories
 
-Loko provides commands to manage Helm repositories in your configuration file. This allows you to:
-- Add custom Helm repositories for service deployments
-- Manage repositories with a simple CLI interface
-- Use added repositories with services and version upgrades
+Loko provides commands to manage Helm repositories in your configuration file:
 
 ### Adding Repositories
-
-Add one or more Helm repositories in a single command:
 
 ```bash
 # Add a single repository
@@ -259,8 +297,6 @@ loko config helm-repo-add \
 ```
 
 ### Removing Repositories
-
-Remove one or more repositories:
 
 ```bash
 # Remove a single repository
@@ -278,13 +314,11 @@ Added repositories appear in your config and can be referenced:
 
 ```yaml
 environment:
-  helm-repositories:
-    - name: bitnami
-      url: https://charts.bitnami.com/bitnami/
-    - name: jetstack
-      url: https://charts.jetstack.io/
+  workloads:
+    helm-repositories:
+      - name: bitnami
+        url: https://charts.bitnami.com/bitnami/
 
-  services:
     user:
       - name: my-app
         config:
@@ -294,9 +328,9 @@ environment:
           version: 1.0.0
 ```
 
-## Managing Service Credentials
+## Managing Workload Credentials
 
-Service credentials (database passwords, etc.) are automatically generated during deployment. Loko provide a dedicated command group to manage them:
+Workload credentials (database passwords, etc.) are automatically generated during deployment:
 
 ```bash
 # Fetch credentials from the cluster
@@ -310,10 +344,10 @@ loko secret show
 
 Credentials are saved locally to:
 ```
-<base-dir>/<env-name>/service-secrets.txt
+<base-dir>/<env-name>/workload-secrets.txt
 ```
 
-Example services with auto-generated credentials:
+Example workloads with auto-generated credentials:
 - MySQL (root password)
 - PostgreSQL (postgres password)
 - MongoDB (root password)
@@ -322,92 +356,97 @@ Example services with auto-generated credentials:
 
 ## Directory Structure
 
-When you run `loko init` or `loko create`, a `.local` directory is created (configurable via `base-dir`).
+When you run `loko init` or `loko create`, a `.loko` directory is created (configurable via `base-dir`).
 
 ```
 .
 ├── loko.yaml                       # Main configuration file
-├── .local/                            # Default directory for cluster data and configs
-│   └── <env-name>/                    # Environment-specific directory (e.g. dev-me)
-│       ├── certs/                     # TLS certificates and keys
-│       │   ├── rootCA.pem             # Root CA certificate
-│       │   ├── <domain>.pem           # Domain certificate
-│       │   ├── <domain>-key.pem       # Domain private key
+├── .loko/                          # Default directory for cluster data and configs
+│   └── <env-name>/                 # Environment-specific directory (e.g. dev-me)
+│       ├── certs/                  # TLS certificates and keys
+│       │   ├── rootCA.pem          # Root CA certificate
+│       │   ├── <domain>.pem        # Domain certificate
+│       │   ├── <domain>-key.pem    # Domain private key
 │       │   └── <domain>-combined.pem  # Combined cert and key
-│       ├── config/                    # Generated configuration files
-│       │   ├── cluster.yaml           # KinD cluster configuration
-│       │   ├── containerd/            # Container runtime config (per registry)
+│       ├── config/                 # Generated configuration files
+│       │   ├── cluster.yaml        # KinD cluster configuration
+│       │   ├── containerd/         # Container runtime config (per registry)
 │       │   │   ├── cr.dev.me/hosts.toml
 │       │   │   └── docker.io/hosts.toml
-│       │   ├── dnsmasq.conf           # Local DNS configuration
-│       │   └── helmfile.yaml          # Helm releases definition
-│       ├── logs/                      # Kubernetes node logs
-│       ├── storage/                   # Persistent volume data
-│       ├── kubeconfig                 # Cluster access configuration
-│       └── service-secrets.txt        # Generated service credentials
+│       │   ├── dnsmasq.conf        # Local DNS configuration
+│       │   └── helmfile.yaml       # Helm releases definition
+│       ├── logs/                   # Kubernetes node logs
+│       ├── storage/                # Persistent volume data
+│       ├── kubeconfig              # Cluster access configuration
+│       └── workload-secrets.txt    # Generated workload credentials
 ```
 
-> **Note**: The `.local` directory is git-ignored by default.
+> **Note**: The `.loko` directory is git-ignored by default.
 
-## Service Management
+## Workload Management
 
-Loko permits granular control over your services through the `services` command group.
+Loko permits granular control over your workloads through the `workload` command group.
 
-### Listing Services
+### Listing Workloads
 
-View all enabled services, their type, namespace, and current status:
+View all enabled workloads, their type, namespace, and current status:
 
 ```bash
-loko service list
+loko workload list
 ```
 
-You can filter by type:
+Filter by type or status:
 ```bash
-loko service list --user      # Only user services
-loko service list --system    # Only system services
-loko service list --internal  # Only internal components (Traefik, Registry, etc.)
+loko workload list --all       # All workloads including disabled
+loko workload list --user      # Only enabled user workloads
+loko workload list --system    # Only enabled system workloads
+loko workload list --internal  # Only enabled internal components (Traefik, Registry, etc.)
+loko workload list --disabled  # Only disabled workloads
+loko workload list --system --disabled  # Disabled system workloads only
 ```
 
 ### Deploying and Undeploying
 
-Deploy or undeploy specific services:
+Deploy or undeploy specific workloads:
 
 ```bash
-# Deploy all user and system services
-loko service deploy
+# Deploy all user and system workloads
+loko workload deploy
 
-# Deploy a specific service
-loko service deploy mongodb
+# Deploy a specific workload
+loko workload deploy mongodb
 
-# Undeploy a specific service
-loko service undeploy garage
+# Undeploy a specific workload
+loko workload undeploy garage
 
-# Include internal services
-loko service deploy --internal
+# Include internal workloads
+loko workload deploy --internal
 ```
 
-The `deploy` and `undeploy` commands default to targeting **user** and **system** services. Use `--all` or specific type flags to include internal components.
+The `deploy` and `undeploy` commands default to targeting **user** and **system** workloads. Use `--all` or specific type flags to include internal components.
 
-> **Note**: selective deployment uses `helmfile --selector` under the hood.
+> **Note**: Selective deployment uses `helmfile --selector` under the hood.
 
-### Service Types and DNS Structure
+### Workload Types and DNS Structure
 
-1. **System Services** (`service.local.domain`):
-   - Core infrastructure services (databases, message queues, etc.)
+1. **System Workloads** (`workload.network.domain`):
+   - Core infrastructure workloads (databases, message queues, etc.)
    - Direct DNS resolution (e.g., `mysql.dev.me`, `postgres.dev.me`)
-   - No wildcard resolution for security
 
-2. **Applications** (`${LOCAL_APPS_DOMAIN}`):
-   - Custom applications and services
-   - Either under `.apps` subdomain (`service.apps.local.domain`) or direct domain (`service.local.domain`)
-   - Configurable via `use-apps-subdomain` setting
+2. **User Workloads** (`workload.network.subdomain.value.network.domain`):
+   - Custom applications and workloads
+   - Either under subdomain (`myapp.apps.dev.me`) or direct domain (`myapp.dev.me`)
+   - Configurable via `network.subdomain.enabled` setting
 
-3. **Core Infrastructure**:
-   - Registry service (e.g., `cr.dev.me`)
+3. **Internal Components**:
+   - Registry (e.g., `cr.dev.me`)
+   - Traefik ingress controller
+   - DNS service (dnsmasq)
+   - Metrics server (optional)
 
-### Accessing Services
+### Accessing Workloads
 
-Once the environment is running, services are accessible through:
+Once the environment is running, workloads are accessible through:
 
 1. **Direct Port Access**:
    ```bash
@@ -417,17 +456,17 @@ Once the environment is running, services are accessible through:
 
 2. **Domain Names**:
    ```bash
-   # Example for system service
+   # Example for system workload
    psql -h postgres.dev.me -U postgres
    ```
 
-3. **Service Credentials**:
-   - Passwords are automatically generated and stored in `<local-dir>/<env-name>/service-secrets.txt`
-   - Or fetch them with: `loko secret`
+3. **Workload Credentials**:
+   - Passwords are automatically generated and stored in `<base-dir>/<env-name>/workload-secrets.txt`
+   - Or fetch them with: `loko secret show`
 
 ### Using the Local Container Registry
 
-The environment includes a local container registry accessible at `<registry-name>.<local-domain>`.
+The environment includes a local container registry accessible at `<registry.name>.<network.domain>`.
 
 1. **Push Images**:
    ```bash
@@ -449,18 +488,29 @@ The environment supports advanced node scheduling configurations to separate inf
 Configure custom labels in `loko.yaml`:
 
 ```yaml
-nodes:
-  labels:
-    control-plane:
-      tier: "infrastructure"
-    worker:
-      tier: "application"
+cluster:
+  nodes:
+    labels:
+      control-plane:
+        tier: "infrastructure"
+      worker:
+        tier: "application"
 ```
 
-### Scheduling Flags
+### Scheduling Configuration
 
-- **`internal-components-on-control-plane`**: Forces infrastructure components (Traefik, registry) to run only on control-plane nodes.
-- **`run-services-on-workers-only`**: Forces application services (databases, etc.) to run only on worker nodes.
+Control workload placement with the scheduling section:
+
+```yaml
+cluster:
+  nodes:
+    scheduling:
+      control-plane:
+        allow-workloads: true              # Allow user/system workloads on control-plane
+        isolate-internal-components: true  # Force Traefik/registry to control-plane only
+      workers:
+        isolate-workloads: true            # Force user/system workloads to workers only
+```
 
 ## OCI Registry and Helm Chart Validation
 
@@ -480,7 +530,7 @@ This runs a comprehensive check including:
 
 ## Configuration
 
-The environment is configured through `loko.yaml`. You can generate a default one with `loko generate-config`.
+The environment is configured through `loko.yaml`. Generate a default one with `loko config generate`.
 
 ### Schema Structure
 
@@ -489,53 +539,69 @@ environment:
   # General settings
   name: string                    # Name of the environment
   base-dir: string                # Base directory for storage
-  expand-env-vars: boolean        # Whether to expand OS and k8s-env variables
+  expand-env-vars: boolean        # Whether to expand OS and loko variables
 
-  # Centralized repository definitions
-  helm-repositories: array        # List of Helm repositories
+  # Cluster configuration
+  cluster:
+    provider:
+      name: string                # Provider name (currently only "kind" supported)
+      runtime: string             # Container runtime (docker or podman)
 
-  # Provider configuration
-  provider:
-    name: string                  # Provider name (currently only "kind" supported)
-    runtime: string               # Container runtime (docker or podman)
+    kubernetes:
+      api-port: integer           # API server port
+      image: string               # Node image
+      tag: string                 # Node image tag
 
-  # Kubernetes configuration
-  kubernetes:
-    api-port: integer             # API server port
-    image: string                 # Node image
-    tag: string                   # Node image tag
-
-  # Node configuration
-  nodes:
-    servers: integer              # Number of control-plane nodes
-    workers: integer              # Number of worker nodes
-    allow-scheduling-on-control-plane: boolean
-    internal-components-on-control-plane: boolean
+    nodes:
+      servers: integer            # Number of control-plane nodes
+      workers: integer            # Number of worker nodes
+      scheduling:
+        control-plane:
+          allow-workloads: boolean
+          isolate-internal-components: boolean
+        workers:
+          isolate-workloads: boolean
+      labels:                     # Optional custom node labels
+        control-plane: {}
+        worker: {}
 
   # Network configuration
-  local-ip: string                # Local IP for DNS resolution
-  local-domain: string            # Domain name
-  local-dns-port: integer         # DNS resolver port (default 53)
-  local-lb-ports: array           # Load balancer ports
-  use-apps-subdomain: boolean     # Use apps subdomain
-  apps-subdomain: string          # Subdomain for apps
+  network:
+    ip: string                    # Local IP for DNS resolution
+    domain: string                # Domain name
+    dns-port: integer             # DNS resolver port (default 53)
+    subdomain:
+      enabled: boolean            # Use subdomain for user apps
+      value: string               # Subdomain value (e.g., "apps")
+    lb-ports: array               # Load balancer ports [80, 443]
 
   # Registry configuration
   registry:
-    name: string
+    name: string                  # Registry name (e.g., "cr")
     storage:
-      size: string
+      size: string                # PVC size (e.g., "10Gi")
+    mirroring:
+      enabled: boolean
+      sources: array              # List of mirror sources
 
-  # Internal components
-  internal-components: array      # List of internal components with versions
+  # Internal components (infrastructure)
+  internal-components:
+    traefik:
+      version: string
+    zot:
+      version: string
+    dnsmasq:
+      version: string
+    metrics-server:
+      version: string
+      enabled: boolean            # Only metrics-server is optional
 
-  # Service configuration
-  use-service-presets: boolean    # Whether to use service presets
-  run-services-on-workers-only: boolean
-  enable-metrics-server: boolean
-  services:
-    system: array                 # List of system services to deploy
-    user: array                   # List of user-defined services
+  # Workload configuration
+  workloads:
+    use-presets: boolean          # Whether to use workload presets
+    helm-repositories: array      # Centralized Helm repo definitions
+    system: array                 # List of system workloads
+    user: array                   # List of user-defined workloads
 ```
 
 ### CLI Overrides
@@ -550,7 +616,7 @@ See `loko init --help` for all available overrides.
 
 ### Custom DNS Port
 
-Loko runs a lightweight DNS container on your machine so that services such as `postgres.dev.me` resolve locally. By default it binds to the standard DNS port 53, but some hosts already listen on that port. If you need to avoid a conflict, set `local-dns-port` in `loko.yaml` (or pass `--local-dns-port` to `loko init`). Loko will start the DNS container on the specified port and automatically update the `/etc/resolver/<domain>` entry so lookups continue to work.
+Loko runs a lightweight DNS container on your machine so that services such as `postgres.dev.me` resolve locally. By default it binds to the standard DNS port 53, but some hosts already listen on that port. If you need to avoid a conflict, set `network.dns-port` in `loko.yaml` (or pass `--dns-port` to `loko init`). Loko will start the DNS container on the specified port and automatically update the `/etc/resolver/<domain>` entry so lookups continue to work.
 
 ## Troubleshooting
 
@@ -560,12 +626,12 @@ Loko runs a lightweight DNS container on your machine so that services such as `
 
 2. **Certificate Issues**
    - Regenerate certificates: `loko init` (will re-run certificate setup)
-   - Verify cert location: `ls <local-dir>/<env-name>/certs/`
+   - Verify cert location: `ls <base-dir>/<env-name>/certs/`
 
-3. **Service Access Issues**
+3. **Workload Access Issues**
    - Validate environment: `loko validate`
    - Verify ingress: `kubectl get ingress -A`
-   - Check credentials: `loko secret`
+   - Check credentials: `loko secret show`
 
 4. **OCI Registry Issues**
    - Test registry connectivity: `docker pull cr.dev.me/test:latest`
@@ -573,7 +639,11 @@ Loko runs a lightweight DNS container on your machine so that services such as `
 
 5. **Version Upgrade Issues**
    - Restore from backup: `mv loko-prev.yaml loko.yaml`
-   - Check Renovate comment syntax in config file
+   - Check loko-updater comment syntax in config file
+
+6. **Port Conflicts**
+   - Check what's using a port: `sudo lsof -i :53` (macOS) or `sudo netstat -tlnp | grep :53` (Linux)
+   - Change the DNS port in config: `network.dns-port: 5353`
 
 ## Development
 
@@ -589,8 +659,18 @@ uv run loko --help
 ### Running Tests
 
 ```bash
-uv run loko --help
-uv run loko init --help
+# Run all unit tests
+uv run pytest tests/ --ignore=tests/integration
+
+# Run with verbose output
+uv run pytest tests/ -v --ignore=tests/integration
+```
+
+### Code Quality
+
+```bash
+uv run ruff check loko/
+uv run ruff format loko/
 ```
 
 ## License

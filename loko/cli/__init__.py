@@ -52,10 +52,10 @@ from loko.cli_types import (
     K8sVersionArg,
     LBPortsArg,
     AppsSubdomainArg,
-    ServicePresetsArg,
+    WorkloadPresetsArg,
     MetricsServerArg,
-    EnableServiceArg,
-    DisableServiceArg,
+    EnableWorkloadArg,
+    DisableWorkloadArg,
     BaseDirArg,
     ExpandVarsArg,
     K8sAPIPortArg,
@@ -63,7 +63,7 @@ from loko.cli_types import (
     InternalOnControlArg,
     RegistryNameArg,
     RegistryStorageArg,
-    ServicesOnWorkersArg,
+    WorkloadsOnWorkersArg,
 )
 from loko.updates import upgrade_config
 from .commands.lifecycle import (
@@ -83,11 +83,14 @@ from .commands.status import (
 )
 from .commands.config import (
     generate_config as config_generate,
+    detect_ip as config_detect_ip,
     config_upgrade as config_upgrade_cmd,
+    config_validate as config_validate_cmd,
+    config_port_check as config_port_check_cmd,
     helm_repo_add,
     helm_repo_remove,
 )
-from .commands.services import app as service_app
+from .commands.workloads import app as workload_app
 from .commands.secrets import app as secret_app
 from .commands.utility import (
     version as utility_version,
@@ -126,7 +129,7 @@ def version_callback(
 
 app = typer.Typer(
     name="loko",
-    help="Local Kubernetes Environment Manager - Create and manage local K8s clusters with Kind, DNS via dnsmasq, SSL certificates via mkcert, and service deployment via Helm/Helmfile. Perfect for local development without cloud dependencies.",
+    help="Local Kubernetes Environment Manager - Create and manage local K8s clusters with Kind, DNS via dnsmasq, SSL certificates via mkcert, and workload deployment via Helm/Helmfile. Perfect for local development without cloud dependencies.",
     add_completion=True,
     no_args_is_help=True,
     pretty_exceptions_enable=True,
@@ -140,7 +143,7 @@ config_app = typer.Typer(
     context_settings={"help_option_names": ["-h", "--help"]},
 )
 app.add_typer(config_app)
-app.add_typer(service_app)
+app.add_typer(workload_app)
 app.add_typer(secret_app)
 
 console = Console()
@@ -164,10 +167,10 @@ def init(
     k8s_version: K8sVersionArg = None,
     lb_ports: LBPortsArg = None,
     apps_subdomain: AppsSubdomainArg = None,
-    service_presets: ServicePresetsArg = None,
+    workload_presets: WorkloadPresetsArg = None,
     metrics_server: MetricsServerArg = None,
-    enable_service: EnableServiceArg = None,
-    disable_service: DisableServiceArg = None,
+    enable_workload: EnableWorkloadArg = None,
+    disable_workload: DisableWorkloadArg = None,
     base_dir: BaseDirArg = None,
     expand_vars: ExpandVarsArg = None,
     k8s_api_port: K8sAPIPortArg = None,
@@ -175,17 +178,17 @@ def init(
     internal_on_control: InternalOnControlArg = None,
     registry_name: RegistryNameArg = None,
     registry_storage: RegistryStorageArg = None,
-    services_on_workers: ServicesOnWorkersArg = None,
+    workloads_on_workers: WorkloadsOnWorkersArg = None,
 ):
     """
     Initialize the local environment (generate configs, setup certs, network).
     """
     lifecycle_init(
         config_file, templates_dir, name, domain, workers, control_planes, runtime,
-        local_ip, k8s_version, lb_ports, apps_subdomain, service_presets,
-        metrics_server, enable_service, disable_service,
+        local_ip, k8s_version, lb_ports, apps_subdomain, workload_presets,
+        metrics_server, enable_workload, disable_workload,
         base_dir, expand_vars, k8s_api_port, schedule_on_control,
-        internal_on_control, registry_name, registry_storage, services_on_workers
+        internal_on_control, registry_name, registry_storage, workloads_on_workers
     )
 
 @app.command()
@@ -201,10 +204,10 @@ def create(
     k8s_version: K8sVersionArg = None,
     lb_ports: LBPortsArg = None,
     apps_subdomain: AppsSubdomainArg = None,
-    service_presets: ServicePresetsArg = None,
+    workload_presets: WorkloadPresetsArg = None,
     metrics_server: MetricsServerArg = None,
-    enable_service: EnableServiceArg = None,
-    disable_service: DisableServiceArg = None,
+    enable_workload: EnableWorkloadArg = None,
+    disable_workload: DisableWorkloadArg = None,
     base_dir: BaseDirArg = None,
     expand_vars: ExpandVarsArg = None,
     k8s_api_port: K8sAPIPortArg = None,
@@ -212,17 +215,17 @@ def create(
     internal_on_control: InternalOnControlArg = None,
     registry_name: RegistryNameArg = None,
     registry_storage: RegistryStorageArg = None,
-    services_on_workers: ServicesOnWorkersArg = None,
+    workloads_on_workers: WorkloadsOnWorkersArg = None,
 ):
     """
     Create the full environment.
     """
     lifecycle_create(
         config_file, templates_dir, name, domain, workers, control_planes, runtime,
-        local_ip, k8s_version, lb_ports, apps_subdomain, service_presets,
-        metrics_server, enable_service, disable_service,
+        local_ip, k8s_version, lb_ports, apps_subdomain, workload_presets,
+        metrics_server, enable_workload, disable_workload,
         base_dir, expand_vars, k8s_api_port, schedule_on_control,
-        internal_on_control, registry_name, registry_storage, services_on_workers
+        internal_on_control, registry_name, registry_storage, workloads_on_workers
     )
 
 @app.command()
@@ -245,10 +248,10 @@ def recreate(
     k8s_version: K8sVersionArg = None,
     lb_ports: LBPortsArg = None,
     apps_subdomain: AppsSubdomainArg = None,
-    service_presets: ServicePresetsArg = None,
+    workload_presets: WorkloadPresetsArg = None,
     metrics_server: MetricsServerArg = None,
-    enable_service: EnableServiceArg = None,
-    disable_service: DisableServiceArg = None,
+    enable_workload: EnableWorkloadArg = None,
+    disable_workload: DisableWorkloadArg = None,
     base_dir: BaseDirArg = None,
     expand_vars: ExpandVarsArg = None,
     k8s_api_port: K8sAPIPortArg = None,
@@ -256,17 +259,17 @@ def recreate(
     internal_on_control: InternalOnControlArg = None,
     registry_name: RegistryNameArg = None,
     registry_storage: RegistryStorageArg = None,
-    services_on_workers: ServicesOnWorkersArg = None,
+    workloads_on_workers: WorkloadsOnWorkersArg = None,
 ):
     """
     Recreate the environment (destroy + create).
     """
     lifecycle_recreate(
         config_file, templates_dir, name, domain, workers, control_planes, runtime,
-        local_ip, k8s_version, lb_ports, apps_subdomain, service_presets,
-        metrics_server, enable_service, disable_service,
+        local_ip, k8s_version, lb_ports, apps_subdomain, workload_presets,
+        metrics_server, enable_workload, disable_workload,
         base_dir, expand_vars, k8s_api_port, schedule_on_control,
-        internal_on_control, registry_name, registry_storage, services_on_workers
+        internal_on_control, registry_name, registry_storage, workloads_on_workers
     )
 
 @app.command()
@@ -324,15 +327,22 @@ def help():
     console.print(ctx.get_help())
 
 @app.command(name="check-prerequisites")
-def check_prerequisites():
+def check_prerequisites(
+    install: Annotated[bool, typer.Option(
+        "--install", "-i",
+        help="Attempt to install missing tools via mise"
+    )] = False
+):
     """
     Check if all required tools are installed.
+
+    Use --install to automatically install missing tools via mise.
     """
-    utility_check_prerequisites()
+    utility_check_prerequisites(install=install)
 
 
-@app.command(name="generate-config")
-def generate_config(
+@config_app.command("generate")
+def config_generate_command(
     output: Annotated[str, typer.Option("--output", "-o", help="Output file path")] = "loko.yaml",
     force: Annotated[bool, typer.Option("--force", "-f", help="Overwrite existing file")] = False
 ):
@@ -342,14 +352,51 @@ def generate_config(
     config_generate(output, force)
 
 
+@config_app.command("detect-ip")
+def config_detect_ip_command():
+    """
+    Detect and display the local IP address.
+
+    Uses multiple detection methods to find the local IP that should be
+    used for DNS resolution and wildcard certificates.
+    """
+    config_detect_ip()
+
+
+@config_app.command("validate")
+def config_validate_command(
+    config_file: ConfigArg = "loko.yaml",
+):
+    """
+    Validate the configuration file structure and values.
+
+    Loads the config file and validates it against the schema to ensure
+    all required fields are present and values are valid.
+    """
+    config_validate_cmd(config_file)
+
+
+@config_app.command("port-check")
+def config_port_check_command(
+    config_file: ConfigArg = "loko.yaml",
+):
+    """
+    Check availability of all configured ports.
+
+    Validates that DNS port, load balancer ports, and workload ports
+    are available before cluster creation.
+    """
+    config_port_check_cmd(config_file)
+
+
 @config_app.command("upgrade")
 def config_upgrade_command(
     config_file: ConfigArg = "loko.yaml",
 ):
     """
-    Upgrade component versions in config file by checking renovate comments.
+    Upgrade component versions in config file by checking loko-updater comments.
 
-    This command reads renovate-style comments in the config file and queries
+    This command reads loko-updater comments in the config file and queries
     the appropriate datasources (Docker Hub, Helm repositories) to find the
     latest versions of components.
     """

@@ -10,30 +10,51 @@ def sample_config():
         "environment": {
             "name": "test-env",
             "base-dir": "/tmp/loko",
-            "local-ip": "127.0.0.1",
-            "local-domain": "loko.local",
-            "local-lb-ports": [80, 443],
-            "internal-components": [],
-            "provider": {
-                "name": "kind",
-                "runtime": "docker"
+            "cluster": {
+                "provider": {
+                    "name": "kind",
+                    "runtime": "docker"
+                },
+                "kubernetes": {
+                    "api-port": 6443,
+                    "image": "kindest/node",
+                    "tag": "v1.27.3"
+                },
+                "nodes": {
+                    "servers": 1,
+                    "workers": 2,
+                    "scheduling": {
+                        "control-plane": {
+                            "allow-workloads": True,
+                            "isolate-internal-components": True
+                        },
+                        "workers": {
+                            "isolate-workloads": False
+                        }
+                    }
+                }
             },
-            "kubernetes": {
-                "api-port": 6443,
-                "image": "kindest/node",
-                "tag": "v1.27.3"
+            "network": {
+                "ip": "127.0.0.1",
+                "domain": "loko.local",
+                "dns-port": 53,
+                "subdomain": {
+                    "enabled": True,
+                    "value": "apps"
+                },
+                "lb-ports": [80, 443]
             },
-            "nodes": {
-                "servers": 1,
-                "workers": 2,
-                "allow-scheduling-on-control-plane": True,
-                "internal-components-on-control-plane": True
+            "internal-components": {
+                "traefik": {"version": "37.3.0"},
+                "zot": {"version": "0.1.66"},
+                "dnsmasq": {"version": "2.90"},
+                "metrics-server": {"version": "3.13.0", "enabled": False}
             },
             "registry": {
                 "name": "registry",
                 "storage": {"size": "10Gi"}
             },
-            "services": {
+            "workloads": {
                 "system": [],
                 "user": []
             }
@@ -184,37 +205,39 @@ def test_parse_secrets_file_empty(sample_config, tmp_path):
     runner = CommandRunner(sample_config)
     runner.k8s_dir = str(tmp_path)
 
-    services = runner._parse_secrets_file()
-    assert services == {}
+    workloads = runner._parse_secrets_file()
+    assert workloads == {}
 
 
-def test_parse_secrets_file_with_services(sample_config, tmp_path):
-    """Test parsing secrets file with multiple services."""
+def test_parse_secrets_file_with_workloads(sample_config, tmp_path):
+    """Test parsing secrets file with multiple workloads."""
     runner = CommandRunner(sample_config)
     runner.k8s_dir = str(tmp_path)
 
     # Create a secrets file
-    secrets_file = tmp_path / "service-secrets.txt"
-    secrets_file.write_text("""# Service Credentials for test-env
+    secrets_file = tmp_path / "workload-secrets.txt"
+    secrets_file.write_text("""# Workload Credentials for test-env
 # Generated: 2026-01-03 14:00:00
 
-Service: rabbitmq
+Workload: rabbitmq
 Namespace: common-services
 Username: admin
 Password: test123
----
-Service: garage
+
+==================================================
+
+Workload: garage
 Access Key: GK123
 Secret Key: secret456
 Endpoint: https://s3.dev.me
 """)
 
-    services = runner._parse_secrets_file()
-    assert len(services) == 2
-    assert 'rabbitmq' in services
-    assert 'garage' in services
-    assert 'Password: test123' in services['rabbitmq']
-    assert 'Access Key: GK123' in services['garage']
+    workloads = runner._parse_secrets_file()
+    assert len(workloads) == 2
+    assert 'rabbitmq' in workloads
+    assert 'garage' in workloads
+    assert 'Password: test123' in workloads['rabbitmq']
+    assert 'Access Key: GK123' in workloads['garage']
 
 
 def test_write_secrets_file(sample_config, tmp_path):
@@ -222,66 +245,68 @@ def test_write_secrets_file(sample_config, tmp_path):
     runner = CommandRunner(sample_config)
     runner.k8s_dir = str(tmp_path)
 
-    services = {
-        'garage': 'Service: garage\nAccess Key: GK123\nSecret Key: secret456',
-        'rabbitmq': 'Service: rabbitmq\nNamespace: common-services\nPassword: test123'
+    workloads = {
+        'garage': 'Workload: garage\nAccess Key: GK123\nSecret Key: secret456',
+        'rabbitmq': 'Workload: rabbitmq\nNamespace: common-services\nPassword: test123'
     }
 
-    runner._write_secrets_file(services)
+    runner._write_secrets_file(workloads)
 
-    secrets_file = tmp_path / "service-secrets.txt"
+    secrets_file = tmp_path / "workload-secrets.txt"
     assert secrets_file.exists()
 
     content = secrets_file.read_text()
-    assert '# Service Credentials for test-env' in content
-    assert 'Service: garage' in content
-    assert 'Service: rabbitmq' in content
+    assert '# Workload Credentials for test-env' in content
+    assert 'Workload: garage' in content
+    assert 'Workload: rabbitmq' in content
     # Should be sorted alphabetically
     assert content.index('garage') < content.index('rabbitmq')
 
 
-def test_remove_service_secrets(sample_config, tmp_path):
-    """Test removing specific services from secrets file."""
+def test_remove_workload_secrets(sample_config, tmp_path):
+    """Test removing specific workloads from secrets file."""
     runner = CommandRunner(sample_config)
     runner.k8s_dir = str(tmp_path)
 
-    # Create initial secrets file with two services
-    secrets_file = tmp_path / "service-secrets.txt"
-    secrets_file.write_text("""# Service Credentials for test-env
+    # Create initial secrets file with two workloads
+    secrets_file = tmp_path / "workload-secrets.txt"
+    secrets_file.write_text("""# Workload Credentials for test-env
 # Generated: 2026-01-03 14:00:00
 
-Service: rabbitmq
+Workload: rabbitmq
 Password: test123
----
-Service: garage
+
+==================================================
+
+Workload: garage
 Access Key: GK123
 """)
 
     # Remove rabbitmq
-    runner.remove_service_secrets(['rabbitmq'])
+    runner.remove_workload_secrets(['rabbitmq'])
 
     # Check that only garage remains
-    services = runner._parse_secrets_file()
-    assert len(services) == 1
-    assert 'garage' in services
-    assert 'rabbitmq' not in services
+    workloads = runner._parse_secrets_file()
+    assert len(workloads) == 1
+    assert 'garage' in workloads
+    assert 'rabbitmq' not in workloads
 
 
-def test_remove_all_services(sample_config, tmp_path):
-    """Test that file is removed when all services are deleted."""
+def test_remove_all_workloads(sample_config, tmp_path):
+    """Test that file is removed when all workloads are deleted."""
     runner = CommandRunner(sample_config)
     runner.k8s_dir = str(tmp_path)
 
-    # Create secrets file with one service
-    secrets_file = tmp_path / "service-secrets.txt"
-    secrets_file.write_text("""# Service Credentials for test-env
+    # Create secrets file with one workload
+    secrets_file = tmp_path / "workload-secrets.txt"
+    secrets_file.write_text("""# Workload Credentials for test-env
 
-Service: rabbitmq
+Workload: rabbitmq
 Password: test123
 """)
 
-    # Remove the only service
-    runner.remove_service_secrets(['rabbitmq'])
+    # Remove the only workload
+    runner.remove_workload_secrets(['rabbitmq'])
 
     # File should be removed
     assert not secrets_file.exists()

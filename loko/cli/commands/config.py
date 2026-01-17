@@ -1,4 +1,4 @@
-"""Config commands: generate-config, upgrade, helm-repo management."""
+"""Config commands: generate, upgrade, validate, port-check, helm-repo management."""
 import os
 import re
 import sys
@@ -7,11 +7,14 @@ from typing import Optional, List
 from typing_extensions import Annotated
 import typer
 from rich.console import Console
+from rich.table import Table
 from ruamel.yaml import YAML
+from pydantic import ValidationError
 
-from loko.validators import ensure_config_file
+from loko.validators import ensure_config_file, check_ports_available
 from loko.updates import upgrade_config
 from loko.cli_types import ConfigArg
+from loko.utils import load_config
 from .lifecycle import _detect_local_ip
 
 
@@ -45,8 +48,8 @@ def generate_config(
 
     # Replace the hardcoded IP with detected IP
     content = re.sub(
-        r'local-ip:\s+\d+\.\d+\.\d+\.\d+',
-        f'local-ip: {detected_ip}',
+        r'ip:\s+\d+\.\d+\.\d+\.\d+',
+        f'ip: {detected_ip}',
         content
     )
 
@@ -59,18 +62,126 @@ def generate_config(
     console.print("[dim]You can modify the local-ip setting in the config file if needed.[/dim]")
 
 
+def detect_ip() -> None:
+    """
+    Detect and display the local IP address.
+
+    Uses multiple detection methods (default route, socket) to find the local IP
+    that should be used for DNS resolution and wildcard certificates.
+    """
+    detected_ip = _detect_local_ip()
+    console.print(f"[bold cyan]Detected local IP:[/bold cyan] {detected_ip}")
+    console.print()
+    console.print("[dim]If this IP is not correct, update the 'ip' value in your config file manually.[/dim]")
+
+
 def config_upgrade(
     config_file: ConfigArg = "loko.yaml",
 ) -> None:
     """
-    Upgrade component versions in config file by checking renovate comments.
+    Upgrade component versions in config file by checking loko-updater comments.
 
-    This command reads renovate-style comments in the config file and queries
+    This command reads loko-updater comments in the config file and queries
     the appropriate datasources (Docker Hub, Helm repositories) to find the
     latest versions of components.
     """
     ensure_config_file(config_file)
     upgrade_config(config_file)
+
+
+def config_validate(
+    config_file: ConfigArg = "loko.yaml",
+) -> None:
+    """
+    Validate the configuration file structure and values.
+
+    This command loads the config file and validates it against the Pydantic
+    schema to ensure all required fields are present and values are valid.
+    """
+    ensure_config_file(config_file)
+
+    try:
+        config = load_config(config_file)
+        console.print(f"[bold green]✓ Configuration file '{config_file}' is valid[/bold green]")
+        console.print(f"\n[cyan]Environment:[/cyan] {config.environment.name}")
+        console.print(f"[cyan]Kubernetes:[/cyan] {config.environment.cluster.kubernetes.image}:{config.environment.cluster.kubernetes.tag}")
+        console.print(f"[cyan]Domain:[/cyan] {config.environment.network.domain}")
+
+        # Count enabled workloads
+        system_enabled = sum(1 for w in config.environment.workloads.system if w.enabled)
+        user_enabled = sum(1 for w in config.environment.workloads.user if w.enabled)
+        console.print(f"[cyan]Workloads:[/cyan] {system_enabled} system, {user_enabled} user enabled")
+
+    except ValidationError as e:
+        console.print(f"[bold red]✗ Configuration file '{config_file}' is invalid[/bold red]\n")
+        for error in e.errors():
+            location = " → ".join(str(loc) for loc in error['loc'])
+            console.print(f"[red]  • {location}:[/red] {error['msg']}")
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[bold red]✗ Error loading configuration: {e}[/bold red]")
+        sys.exit(1)
+
+
+def config_port_check(
+    config_file: ConfigArg = "loko.yaml",
+) -> None:
+    """
+    Check availability of all configured ports.
+
+    Validates that DNS port, load balancer ports, and workload ports
+    are available before cluster creation.
+    """
+    ensure_config_file(config_file)
+
+    try:
+        config = load_config(config_file)
+    except Exception as e:
+        console.print(f"[bold red]✗ Error loading configuration: {e}[/bold red]")
+        sys.exit(1)
+
+    env = config.environment
+    available, conflicts = check_ports_available(config)
+
+    # Build a table of all ports to check
+    table = Table(title="Port Availability Check", show_header=True, header_style="bold magenta")
+    table.add_column("Category", style="cyan")
+    table.add_column("Port", style="yellow", justify="right")
+    table.add_column("Status", style="green")
+    table.add_column("Used By", style="dim")
+
+    # DNS port
+    dns_port = env.network.dns_port
+    dns_status = "[red]✗ In use[/red]" if 'dns' in conflicts and dns_port in conflicts['dns'] else "[green]✓ Available[/green]"
+    table.add_row("DNS", str(dns_port), dns_status, "dnsmasq")
+
+    # Load balancer ports
+    for port in env.network.lb_ports:
+        lb_status = "[red]✗ In use[/red]" if 'load_balancer' in conflicts and port in conflicts['load_balancer'] else "[green]✓ Available[/green]"
+        table.add_row("Load Balancer", str(port), lb_status, "traefik")
+
+    # Workload ports
+    enabled_workloads = (
+        [wkld for wkld in env.workloads.system if wkld.enabled] +
+        [wkld for wkld in env.workloads.user if wkld.enabled]
+    )
+
+    for workload in enabled_workloads:
+        if workload.ports:
+            for port in workload.ports:
+                wkld_status = "[red]✗ In use[/red]" if 'workloads' in conflicts and port in conflicts['workloads'] else "[green]✓ Available[/green]"
+                table.add_row("Workload", str(port), wkld_status, workload.name)
+
+    console.print(table)
+
+    if available:
+        console.print(f"\n[bold green]✓ All ports are available[/bold green]")
+    else:
+        console.print(f"\n[bold red]✗ Some ports are in use[/bold red]")
+        console.print(f"\n[yellow]To find what's using a port:[/yellow]")
+        console.print(f"[cyan]  • On macOS: sudo lsof -i :<port>[/cyan]")
+        console.print(f"[cyan]  • On Linux: sudo netstat -tlnp | grep :<port>[/cyan]")
+        sys.exit(1)
 
 
 

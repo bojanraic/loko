@@ -10,7 +10,7 @@ from .config import RootConfig
 
 console = Console()
 
-PASSWORD_PROTECTED_SERVICES = {
+PASSWORD_PROTECTED_WORKLOADS = {
     "mysql",
     "postgres",
     "mongodb",
@@ -52,12 +52,13 @@ def is_port_in_use(port: int) -> bool:
 def print_environment_summary(config: RootConfig):
     """Print a summary of the environment after creation/start."""
     env = config.environment
+    network = env.network
 
     # Determine the app domain
-    if env.use_apps_subdomain:
-        app_domain = f"{env.apps_subdomain}.{env.local_domain}"
+    if network.subdomain.enabled:
+        app_domain = f"{network.subdomain.value}.{network.domain}"
     else:
-        app_domain = env.local_domain
+        app_domain = network.domain
 
     # Build the summary
     console.print("\n" + "="*60)
@@ -70,38 +71,38 @@ def print_environment_summary(config: RootConfig):
     console.print(f"\n[bold cyan]Environment Information:[/bold cyan]")
     console.print(f"  Name:              [yellow]{env.name}[/yellow]")
     console.print(f"  Kubeconfig:        [yellow]kind-{env.name}[/yellow]")
-    console.print(f"  Domain:            [yellow]{env.local_domain}[/yellow]")
+    console.print(f"  Domain:            [yellow]{network.domain}[/yellow]")
     console.print(f"  Apps Domain:       [yellow]{app_domain}[/yellow]")
 
-    # Enabled services
-    enabled_services = [svc for svc in env.services.system if svc.enabled]
-    if enabled_services:
-        console.print(f"\n[bold cyan]Enabled System Services:[/bold cyan]")
+    # Enabled workloads
+    enabled_workloads = [wkld for wkld in env.workloads.system if wkld.enabled]
+    if enabled_workloads:
+        console.print(f"\n[bold cyan]Enabled System Workloads:[/bold cyan]")
 
-        # Create table for services
+        # Create table for workloads
         table = Table(show_header=True, header_style="bold magenta", box=None, padding=(0, 2))
-        table.add_column("Service", style="cyan")
+        table.add_column("Workload", style="cyan")
         table.add_column("DNS Name", style="yellow")
         table.add_column("Ports", style="green")
 
-        for svc in enabled_services:
-            dns_name = f"{svc.name}.{env.local_domain}"
-            ports = ", ".join(str(p) for p in svc.ports) if svc.ports else "N/A"
-            table.add_row(svc.name, dns_name, ports)
+        for wkld in enabled_workloads:
+            dns_name = f"{wkld.name}.{network.domain}"
+            ports = ", ".join(str(p) for p in wkld.ports) if wkld.ports else "N/A"
+            table.add_row(wkld.name, dns_name, ports)
 
         console.print(table)
     else:
-        console.print(f"\n[dim]No system services enabled[/dim]")
+        console.print(f"\n[dim]No system workloads enabled[/dim]")
 
-    password_services_enabled = {
-        svc.name
-        for svc in (env.services.system + env.services.user)
-        if svc.enabled and svc.name in PASSWORD_PROTECTED_SERVICES
+    password_workloads_enabled = {
+        wkld.name
+        for wkld in (env.workloads.system + env.workloads.user)
+        if wkld.enabled and wkld.name in PASSWORD_PROTECTED_WORKLOADS
     }
 
-    if password_services_enabled:
-        secrets_file = os.path.join(os.path.expandvars(env.base_dir), env.name, 'service-secrets.txt')
-        console.print(f"\n[bold cyan]Service Credentials:[/bold cyan]")
+    if password_workloads_enabled:
+        secrets_file = os.path.join(os.path.expandvars(env.base_dir), env.name, 'workload-secrets.txt')
+        console.print(f"\n[bold cyan]Workload Credentials:[/bold cyan]")
         console.print(f"  Location: [yellow]{secrets_file}[/yellow]")
 
     # App deployment info
@@ -111,6 +112,6 @@ def print_environment_summary(config: RootConfig):
 
     # Registry info
     console.print(f"\n[bold cyan]Container Registry:[/bold cyan]")
-    console.print(f"  URL: [yellow]{env.registry.name}.{env.local_domain}[/yellow]")
+    console.print(f"  URL: [yellow]{env.registry.name}.{network.domain}[/yellow]")
 
     console.print("\n" + "="*60 + "\n")

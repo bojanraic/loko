@@ -97,7 +97,7 @@ def test_check_ports_available_dns_conflict(mock_port_check, mock_config_path):
     from loko.utils import load_config
 
     config = load_config(mock_config_path)
-    dns_port = config.environment.local_dns_port
+    dns_port = config.environment.network.dns_port
 
     # Only DNS port is in use
     mock_port_check.side_effect = lambda port: port == dns_port
@@ -115,7 +115,7 @@ def test_check_ports_available_lb_conflict(mock_port_check, mock_config_path):
     from loko.utils import load_config
 
     config = load_config(mock_config_path)
-    lb_ports = config.environment.local_lb_ports
+    lb_ports = config.environment.network.lb_ports
 
     # Only LB ports are in use
     mock_port_check.side_effect = lambda port: port in lb_ports
@@ -129,26 +129,26 @@ def test_check_ports_available_lb_conflict(mock_port_check, mock_config_path):
 
 
 @patch("loko.validators._is_port_in_use")
-def test_check_ports_available_service_conflict(mock_port_check, mock_config_path):
-    """Test port checking when service ports are in use."""
+def test_check_ports_available_workload_conflict(mock_port_check, mock_config_path):
+    """Test port checking when workload ports are in use."""
     from loko.utils import load_config
 
     config = load_config(mock_config_path)
 
-    # Find an enabled service with ports
-    enabled_services = [svc for svc in config.environment.services.system if svc.enabled and svc.ports]
+    # Find an enabled workload with ports
+    enabled_workloads = [wkld for wkld in config.environment.workloads.system if wkld.enabled and wkld.ports]
 
-    if enabled_services:
-        service_port = enabled_services[0].ports[0]
+    if enabled_workloads:
+        workload_port = enabled_workloads[0].ports[0]
 
-        # Only service port is in use
-        mock_port_check.side_effect = lambda port: port == service_port
+        # Only workload port is in use
+        mock_port_check.side_effect = lambda port: port == workload_port
 
         available, conflicts = check_ports_available(config)
 
         assert available is False
-        assert 'services' in conflicts
-        assert service_port in conflicts['services']
+        assert 'workloads' in conflicts
+        assert workload_port in conflicts['workloads']
 
 
 @patch("loko.validators._is_port_in_use")
@@ -157,8 +157,8 @@ def test_check_ports_available_multiple_conflicts(mock_port_check, mock_config_p
     from loko.utils import load_config
 
     config = load_config(mock_config_path)
-    dns_port = config.environment.local_dns_port
-    lb_ports = config.environment.local_lb_ports
+    dns_port = config.environment.network.dns_port
+    lb_ports = config.environment.network.lb_ports
 
     # DNS and LB ports are in use
     conflict_ports = [dns_port] + lb_ports
@@ -198,7 +198,7 @@ def test_ensure_ports_available_failure(mock_exit, mock_check, mock_config_path)
     conflicts = {
         'dns': [53],
         'load_balancer': [80, 443],
-        'services': [5432]
+        'workloads': [5432]
     }
     mock_check.return_value = (False, conflicts)
 

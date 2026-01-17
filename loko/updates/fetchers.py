@@ -1,21 +1,22 @@
-"""Version fetching utilities for Docker and Helm.
+"""Version fetching utilities for Docker, Helm, and Git sources.
 
-This module provides functions to fetch the latest versions of Docker images
-and Helm charts from their respective registries. Supports:
+This module provides functions to fetch the latest versions from multiple sources:
 
 - Docker images from Docker Hub (official and user/org images)
 - Helm charts from any Helm repository (via index.yaml parsing)
+- Git repository tags from GitHub, GitLab, Gitea, Forgejo, and other Git hosting services
 - Timing information for performance metrics
 - Proper semantic version validation using packaging.version
 
 The module is designed to be used by the upgrade system for checking component
-versions. Both Docker and Helm fetches run in parallel via ThreadPoolExecutor
-in upgrader.py for improved performance (~1.85x faster for mixed workloads).
+versions. All fetches run in parallel via ThreadPoolExecutor in upgrader.py
+for improved performance (~1.85x faster for mixed workloads).
 """
 import re
 import json
 import time
 import urllib.request
+import urllib.parse
 import yaml
 from typing import Optional
 from packaging.version import parse as parse_version
@@ -180,22 +181,105 @@ def fetch_latest_helm_version(dep_name: str, repository_url: Optional[str] = Non
     return results[dep_name]
 
 
-def fetch_latest_version(renovate_info: dict) -> tuple[Optional[str], float]:
+def fetch_latest_git_tags(repository_url: str) -> tuple[Optional[str], float]:
     """
-    Fetch the latest version based on renovate datasource type.
+    Fetch the latest version tag from a Git repository.
+    Supports GitHub, GitLab (including self-hosted), Gitea, Forgejo, and other Git hosting services.
+    Returns tuple of (latest_tag, elapsed_time_seconds)
+    """
+    start_time = time.time()
+    try:
+        # Convert Git URL to API endpoint
+        # Supports: https://github.com/user/repo.git, https://gitlab.com/user/repo.git, https://git.custom.org/user/repo.git, etc.
+        repo_url = repository_url.rstrip('/').rstrip('.git')
+
+        # Extract host and path
+        if 'https://' in repo_url:
+            host = repo_url.split('https://')[1].split('/')[0]
+            path_parts = repo_url.split(host)[1].lstrip('/').split('/')
+            protocol = 'https://'
+        elif 'http://' in repo_url:
+            host = repo_url.split('http://')[1].split('/')[0]
+            path_parts = repo_url.split(host)[1].lstrip('/').split('/')
+            protocol = 'http://'
+        else:
+            console.print(f"[yellow]Warning: Invalid repository URL format: {repository_url}[/yellow]")
+            return None, time.time() - start_time
+
+        # Detect hosting service and construct appropriate API call
+        if 'github.com' in host:
+            # GitHub API: https://api.github.com/repos/owner/repo/tags
+            api_url = repo_url.replace(f'{protocol}{host}/', 'https://api.github.com/repos/') + '/tags?per_page=100'
+        else:
+            # For other services, use Gitea/Forgejo API (common in self-hosted setups)
+            # Gitea/Forgejo API: https://host/api/v1/repos/owner/repo/tags
+            owner, repo = path_parts[0], path_parts[1] if len(path_parts) > 1 else ''
+
+            if not repo:
+                console.print(f"[yellow]Warning: Could not parse repository path from {repository_url}[/yellow]")
+                return None, time.time() - start_time
+
+            # Use Gitea/Forgejo API (compatible with both)
+            api_url = f'{protocol}{host}/api/v1/repos/{owner}/{repo}/tags?per_page=100'
+
+        req = urllib.request.Request(
+            api_url,
+            headers={
+                'User-Agent': 'loko/0.1.0 (https://github.com/bojanraic/loko)',
+                'Accept': 'application/json'
+            }
+        )
+
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read())
+
+        # Extract tags and find the latest valid version
+        tags = []
+        if isinstance(data, list):
+            # GitHub/GitLab/Gitea format: array of tag objects
+            for tag_info in data:
+                tag_name = tag_info.get('name', '') if isinstance(tag_info, dict) else str(tag_info)
+                if tag_name and not SKIP_TAGS_PATTERN.search(tag_name):
+                    if VERSION_PATTERN.match(tag_name):
+                        try:
+                            parse_version(tag_name)
+                            tags.append(tag_name)
+                        except Exception:
+                            continue
+
+        if tags:
+            return tags[0], time.time() - start_time
+        else:
+            console.print(f"[yellow]Warning: No valid version tags found in {repository_url}[/yellow]")
+            return None, time.time() - start_time
+
+    except Exception as e:
+        console.print(f"[yellow]Warning: Could not fetch Git tags from {repository_url}: {e}[/yellow]")
+        return None, time.time() - start_time
+
+
+def fetch_latest_version(updater_info: dict) -> tuple[Optional[str], float]:
+    """
+    Fetch the latest version based on loko-updater datasource type.
     Returns tuple of (version, elapsed_time_seconds)
     """
-    datasource = renovate_info.get('datasource')
-    dep_name = renovate_info.get('depName')
+    datasource = updater_info.get('datasource')
+    dep_name = updater_info.get('depName')
 
     if not dep_name:
-        console.print(f"[yellow]Warning: No depName found in renovate info[/yellow]")
+        console.print(f"[yellow]Warning: No depName found in updater info[/yellow]")
         return None, 0.0
 
     if datasource == 'docker':
         return fetch_latest_docker_version(dep_name)
     elif datasource == 'helm':
-        return fetch_latest_helm_version(dep_name, renovate_info.get('repositoryUrl'))
+        return fetch_latest_helm_version(dep_name, updater_info.get('repositoryUrl'))
+    elif datasource == 'git-tags':
+        package_name = updater_info.get('packageName')
+        if not package_name:
+            console.print(f"[yellow]Warning: No packageName found for git-tags datasource (depName={dep_name})[/yellow]")
+            return None, 0.0
+        return fetch_latest_git_tags(package_name)
     else:
         console.print(f"[yellow]Warning: Unsupported datasource type: {datasource}[/yellow]")
         return None, 0.0

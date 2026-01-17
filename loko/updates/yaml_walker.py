@@ -1,13 +1,13 @@
-"""YAML structure walking and Renovate comment detection.
+"""YAML structure walking and loko-updater comment detection.
 
 This module provides utilities for traversing YAML structures and extracting
-Renovate-style version comments while preserving the original YAML structure.
+loko-updater version comments while preserving the original YAML structure.
 
-Renovate comments are YAML comments that specify how to check for version updates:
-    # renovate: datasource=docker depName=kindest/node
-    # renovate: datasource=helm depName=traefik repositoryUrl=https://traefik.github.io/charts
+Loko-updater comments are YAML comments that specify how to check for version updates:
+    # loko-updater: datasource=docker depName=kindest/node
+    # loko-updater: datasource=helm depName=traefik repositoryUrl=https://traefik.github.io/charts
 
-The main function walk_yaml_for_renovate() recursively traverses both CommentedMap
+The main function walk_yaml_for_updater() recursively traverses both CommentedMap
 (YAML dicts) and CommentedSeq (YAML lists) structures, extracting comments from
 various positions:
 - Before a key: applies to the next item
@@ -22,12 +22,12 @@ to know which components to check for version updates.
 """
 from typing import Optional
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
-from .parsers import parse_renovate_comment
+from .parsers import parse_updater_comment
 
 
-def walk_yaml_for_renovate(data, updates, path="", processed_comments=None):
+def walk_yaml_for_updater(data, updates, path="", processed_comments=None):
     """
-    Recursively walk YAML structure looking for renovate comments.
+    Recursively walk YAML structure looking for loko-updater comments.
     Only processes each comment once and associates it with the correct value.
     """
     if processed_comments is None:
@@ -39,9 +39,9 @@ def walk_yaml_for_renovate(data, updates, path="", processed_comments=None):
             value = data[key]
             current_path = f"{path}.{key}" if path else str(key)
 
-            # Only check for renovate comments on scalar values (not nested structures)
+            # Only check for updater comments on scalar values (not nested structures)
             if not isinstance(value, (CommentedMap, CommentedSeq)):
-                renovate_info = None
+                updater_info = None
 
                 # Check if the PREVIOUS key has a comment in position [2] (after that key)
                 # That comment should apply to THIS (current) key
@@ -55,17 +55,37 @@ def walk_yaml_for_renovate(data, updates, path="", processed_comments=None):
                             comment_text = comment_obj.value
                             comment_id = (id(data), prev_key, 'after_to', key)
                             if comment_id not in processed_comments:
-                                parsed = parse_renovate_comment(comment_text)
+                                parsed = parse_updater_comment(comment_text)
                                 if parsed:
-                                    renovate_info = parsed
+                                    updater_info = parsed
                                     processed_comments.add(comment_id)
 
-                if renovate_info:
-                    updates.append((current_path, key, renovate_info, value, data))
+                # For the first key (i == 0), check the parent dict's ca.comment
+                # This handles comments at the start of a dict like:
+                #   traefik:
+                #     # loko-updater: ...
+                #     version: "37.3.0"
+                if not updater_info and i == 0 and hasattr(data, 'ca') and data.ca.comment:
+                    # ca.comment can be [before, after] or just a list of comment tokens
+                    comment_list = data.ca.comment
+                    if comment_list and len(comment_list) > 1 and comment_list[1]:
+                        for comment_obj in (comment_list[1] if isinstance(comment_list[1], list) else [comment_list[1]]):
+                            if comment_obj and hasattr(comment_obj, 'value'):
+                                comment_text = comment_obj.value
+                                comment_id = (id(data), 'dict_start_comment', key)
+                                if comment_id not in processed_comments:
+                                    parsed = parse_updater_comment(comment_text)
+                                    if parsed:
+                                        updater_info = parsed
+                                        processed_comments.add(comment_id)
+                                        break
+
+                if updater_info:
+                    updates.append((current_path, key, updater_info, value, data))
 
             # Recurse into nested structures
             if isinstance(value, (CommentedMap, CommentedSeq)):
-                walk_yaml_for_renovate(value, updates, current_path, processed_comments)
+                walk_yaml_for_updater(value, updates, current_path, processed_comments)
 
     elif isinstance(data, CommentedSeq):
         for idx, item in enumerate(data):
@@ -76,7 +96,7 @@ def walk_yaml_for_renovate(data, updates, path="", processed_comments=None):
                 item_key = list(item.keys())[0]
                 item_value = item[item_key]
 
-                renovate_info = None
+                updater_info = None
 
                 # For the first item, check the sequence's comment
                 if idx == 0 and hasattr(data, 'ca') and hasattr(data.ca, 'comment'):
@@ -87,14 +107,14 @@ def walk_yaml_for_renovate(data, updates, path="", processed_comments=None):
                                 comment_text = comment_obj.value
                                 comment_id = (id(data), 'seq_comment', idx)
                                 if comment_id not in processed_comments:
-                                    parsed = parse_renovate_comment(comment_text)
+                                    parsed = parse_updater_comment(comment_text)
                                     if parsed:
-                                        renovate_info = parsed
+                                        updater_info = parsed
                                         processed_comments.add(comment_id)
                                         break
 
                 # For subsequent items, check the previous item's key comment (position [2])
-                if not renovate_info and idx > 0:
+                if not updater_info and idx > 0:
                     prev_item = data[idx - 1]
                     if isinstance(prev_item, CommentedMap) and len(prev_item) == 1:
                         prev_key = list(prev_item.keys())[0]
@@ -106,14 +126,14 @@ def walk_yaml_for_renovate(data, updates, path="", processed_comments=None):
                                     comment_text = comment_obj.value
                                     comment_id = (id(prev_item), prev_key, 'after')
                                     if comment_id not in processed_comments:
-                                        parsed = parse_renovate_comment(comment_text)
+                                        parsed = parse_updater_comment(comment_text)
                                         if parsed:
-                                            renovate_info = parsed
+                                            updater_info = parsed
                                             processed_comments.add(comment_id)
 
-                if renovate_info:
-                    updates.append((current_path, item_key, renovate_info, item_value, item))
+                if updater_info:
+                    updates.append((current_path, item_key, updater_info, item_value, item))
 
             # Recurse into more complex nested structures
             elif isinstance(item, (CommentedMap, CommentedSeq)):
-                walk_yaml_for_renovate(item, updates, current_path, processed_comments)
+                walk_yaml_for_updater(item, updates, current_path, processed_comments)

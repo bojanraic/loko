@@ -21,7 +21,7 @@ def start(config_file: ConfigArg = "loko.yaml") -> None:
 
     config = get_config(config_file)
     cluster_name = config.environment.name
-    runtime = config.environment.provider.runtime
+    runtime = config.environment.cluster.provider.runtime
     runner = CommandRunner(config)
 
     # Check if cluster exists first
@@ -131,7 +131,7 @@ def stop(config_file: ConfigArg = "loko.yaml") -> None:
 
     config = get_config(config_file)
     cluster_name = config.environment.name
-    runtime = config.environment.provider.runtime
+    runtime = config.environment.cluster.provider.runtime
     runner = CommandRunner(config)
 
     # Check what needs to be stopped before announcing

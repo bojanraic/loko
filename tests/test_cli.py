@@ -92,11 +92,25 @@ def test_validate_help():
     assert "validate" in result.stdout.lower()
 
 
-def test_generate_config_help():
-    """Test loko generate-config --help command."""
-    result = runner.invoke(app, ["generate-config", "--help"])
+def test_config_generate_help():
+    """Test loko config generate --help command."""
+    result = runner.invoke(app, ["config", "generate", "--help"])
     assert result.exit_code == 0
-    assert "generate" in result.stdout.lower() or "config" in result.stdout.lower()
+    assert "generate" in result.stdout.lower()
+
+
+def test_config_validate_help():
+    """Test loko config validate --help command."""
+    result = runner.invoke(app, ["config", "validate", "--help"])
+    assert result.exit_code == 0
+    assert "validate" in result.stdout.lower()
+
+
+def test_config_port_check_help():
+    """Test loko config port-check --help command."""
+    result = runner.invoke(app, ["config", "port-check", "--help"])
+    assert result.exit_code == 0
+    assert "port" in result.stdout.lower()
 
 
 def test_no_args_shows_help():

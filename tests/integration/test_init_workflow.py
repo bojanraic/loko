@@ -101,7 +101,7 @@ def test_init_with_custom_output_location(integration_workspace, loko_cli):
 
     # Generate config
     subprocess.run(
-        [loko_cli, "generate-config",
+        [loko_cli, "config", "generate",
          "--output", str(config_path),
          "--force"],
         capture_output=True,

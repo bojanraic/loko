@@ -23,70 +23,70 @@ def _apply_config_overrides(config: RootConfig, **overrides) -> None:
     if overrides.get('name'):
         config.environment.name = overrides['name']
     if overrides.get('domain'):
-        config.environment.local_domain = overrides['domain']
+        config.environment.network.domain = overrides['domain']
     if overrides.get('local_ip'):
-        config.environment.local_ip = overrides['local_ip']
+        config.environment.network.ip = overrides['local_ip']
     if overrides.get('apps_subdomain'):
-        config.environment.apps_subdomain = overrides['apps_subdomain']
+        config.environment.network.subdomain.value = overrides['apps_subdomain']
     if overrides.get('base_dir'):
         config.environment.base_dir = overrides['base_dir']
 
-    # Node overrides
+    # Node overrides (now under cluster.nodes)
     if overrides.get('workers') is not None:
-        config.environment.nodes.workers = overrides['workers']
+        config.environment.cluster.nodes.workers = overrides['workers']
     if overrides.get('control_planes') is not None:
-        config.environment.nodes.servers = overrides['control_planes']
+        config.environment.cluster.nodes.servers = overrides['control_planes']
     if overrides.get('schedule_on_control') is not None:
-        config.environment.nodes.allow_scheduling_on_control_plane = overrides['schedule_on_control']
+        config.environment.cluster.nodes.scheduling.control_plane.allow_workloads = overrides['schedule_on_control']
     if overrides.get('internal_on_control') is not None:
-        config.environment.nodes.internal_components_on_control_plane = overrides['internal_on_control']
+        config.environment.cluster.nodes.scheduling.control_plane.isolate_internal_components = overrides['internal_on_control']
 
-    # Provider overrides
+    # Provider overrides (now under cluster.provider)
     if overrides.get('runtime'):
-        config.environment.provider.runtime = overrides['runtime']
+        config.environment.cluster.provider.runtime = overrides['runtime']
 
-    # Kubernetes overrides
+    # Kubernetes overrides (now under cluster.kubernetes)
     if overrides.get('k8s_version'):
-        config.environment.kubernetes.tag = overrides['k8s_version']
+        config.environment.cluster.kubernetes.tag = overrides['k8s_version']
     if overrides.get('k8s_api_port') is not None:
-        config.environment.kubernetes.api_port = overrides['k8s_api_port']
+        config.environment.cluster.kubernetes.api_port = overrides['k8s_api_port']
 
     # Registry overrides
     if overrides.get('registry_name'):
         config.environment.registry.name = overrides['registry_name']
     if overrides.get('registry_storage'):
-        config.environment.registry.storage["size"] = overrides['registry_storage']
+        config.environment.registry.storage.size = overrides['registry_storage']
 
-    # Load balancer overrides
+    # Load balancer overrides (now under network.lb_ports)
     if overrides.get('lb_ports'):
-        config.environment.local_lb_ports = overrides['lb_ports']
+        config.environment.network.lb_ports = overrides['lb_ports']
 
-    # Feature flags
-    if overrides.get('service_presets') is not None:
-        config.environment.use_service_presets = overrides['service_presets']
+    # Feature flags (now under workloads.use_presets and internal_components.metrics_server.enabled)
+    if overrides.get('workload_presets') is not None:
+        config.environment.workloads.use_presets = overrides['workload_presets']
     if overrides.get('metrics_server') is not None:
-        config.environment.enable_metrics_server = overrides['metrics_server']
+        config.environment.internal_components.metrics_server.enabled = overrides['metrics_server']
     if overrides.get('expand_vars') is not None:
         config.environment.expand_env_vars = overrides['expand_vars']
-    if overrides.get('services_on_workers') is not None:
-        config.environment.run_services_on_workers_only = overrides['services_on_workers']
+    if overrides.get('workloads_on_workers') is not None:
+        config.environment.cluster.nodes.scheduling.workers.isolate_workloads = overrides['workloads_on_workers']
 
 
-def _update_service_state(config: RootConfig, service_names: Optional[List[str]], enabled: bool) -> None:
-    """Update enabled state for services."""
-    if not service_names:
+def _update_workload_state(config: RootConfig, workload_names: Optional[List[str]], enabled: bool) -> None:
+    """Update enabled state for workloads."""
+    if not workload_names:
         return
 
-    for svc_name in service_names:
+    for wkld_name in workload_names:
         found = False
-        if config.environment.services and config.environment.services.system:
-            for svc in config.environment.services.system:
-                if svc.name == svc_name:
-                    svc.enabled = enabled
+        if config.environment.workloads and config.environment.workloads.system:
+            for wkld in config.environment.workloads.system:
+                if wkld.name == wkld_name:
+                    wkld.enabled = enabled
                     found = True
                     break
         if not found:
-            console.print(f"[yellow]Warning: Service '{svc_name}' not found in system services.[/yellow]")
+            console.print(f"[yellow]Warning: Workload '{wkld_name}' not found in system workloads.[/yellow]")
 
 
 def get_config(
@@ -100,10 +100,10 @@ def get_config(
     k8s_version: Optional[str] = None,
     lb_ports: Optional[List[int]] = None,
     apps_subdomain: Optional[str] = None,
-    service_presets: Optional[bool] = None,
+    workload_presets: Optional[bool] = None,
     metrics_server: Optional[bool] = None,
-    enable_services: Optional[List[str]] = None,
-    disable_services: Optional[List[str]] = None,
+    enable_workloads: Optional[List[str]] = None,
+    disable_workloads: Optional[List[str]] = None,
     base_dir: Optional[str] = None,
     expand_vars: Optional[bool] = None,
     k8s_api_port: Optional[int] = None,
@@ -111,7 +111,7 @@ def get_config(
     internal_on_control: Optional[bool] = None,
     registry_name: Optional[str] = None,
     registry_storage: Optional[str] = None,
-    services_on_workers: Optional[bool] = None,
+    workloads_on_workers: Optional[bool] = None,
 ) -> RootConfig:
     if not os.path.exists(config_path):
         console.print(f"[bold red]Configuration file '{config_path}' not found.[/bold red]")
@@ -131,7 +131,7 @@ def get_config(
         k8s_version=k8s_version,
         lb_ports=lb_ports,
         apps_subdomain=apps_subdomain,
-        service_presets=service_presets,
+        workload_presets=workload_presets,
         metrics_server=metrics_server,
         base_dir=base_dir,
         expand_vars=expand_vars,
@@ -140,12 +140,12 @@ def get_config(
         internal_on_control=internal_on_control,
         registry_name=registry_name,
         registry_storage=registry_storage,
-        services_on_workers=services_on_workers,
+        workloads_on_workers=workloads_on_workers,
     )
 
-    # Update service states
-    _update_service_state(config, enable_services, True)
-    _update_service_state(config, disable_services, False)
+    # Update workload states
+    _update_workload_state(config, enable_workloads, True)
+    _update_workload_state(config, disable_workloads, False)
 
     return config
 
@@ -262,10 +262,10 @@ def init(
     k8s_version: Optional[str] = None,
     lb_ports: Optional[List[int]] = None,
     apps_subdomain: Optional[str] = None,
-    service_presets: Optional[bool] = None,
+    workload_presets: Optional[bool] = None,
     metrics_server: Optional[bool] = None,
-    enable_service: Optional[List[str]] = None,
-    disable_service: Optional[List[str]] = None,
+    enable_workload: Optional[List[str]] = None,
+    disable_workload: Optional[List[str]] = None,
     base_dir: Optional[str] = None,
     expand_vars: Optional[bool] = None,
     k8s_api_port: Optional[int] = None,
@@ -273,7 +273,7 @@ def init(
     internal_on_control: Optional[bool] = None,
     registry_name: Optional[str] = None,
     registry_storage: Optional[str] = None,
-    services_on_workers: Optional[bool] = None,
+    workloads_on_workers: Optional[bool] = None,
 ) -> None:
     """
     Initialize the local environment (generate configs, setup certs, network).
@@ -283,14 +283,14 @@ def init(
 
     config = get_config(
         config_file, name, domain, workers, control_planes, runtime,
-        local_ip, k8s_version, lb_ports, apps_subdomain, service_presets,
-        metrics_server, enable_service, disable_service,
+        local_ip, k8s_version, lb_ports, apps_subdomain, workload_presets,
+        metrics_server, enable_workload, disable_workload,
         base_dir, expand_vars, k8s_api_port, schedule_on_control,
-        internal_on_control, registry_name, registry_storage, services_on_workers
+        internal_on_control, registry_name, registry_storage, workloads_on_workers
     )
 
     # Validate cluster configuration
-    ensure_single_server_cluster(config.environment.nodes.servers)
+    ensure_single_server_cluster(config.environment.cluster.nodes.servers)
 
     console.print(f"[bold green]Initializing environment '{config.environment.name}'...[/bold green]")
 
@@ -320,10 +320,10 @@ def create(
     k8s_version: Optional[str] = None,
     lb_ports: Optional[List[int]] = None,
     apps_subdomain: Optional[str] = None,
-    service_presets: Optional[bool] = None,
+    workload_presets: Optional[bool] = None,
     metrics_server: Optional[bool] = None,
-    enable_service: Optional[List[str]] = None,
-    disable_service: Optional[List[str]] = None,
+    enable_workload: Optional[List[str]] = None,
+    disable_workload: Optional[List[str]] = None,
     base_dir: Optional[str] = None,
     expand_vars: Optional[bool] = None,
     k8s_api_port: Optional[int] = None,
@@ -331,7 +331,7 @@ def create(
     internal_on_control: Optional[bool] = None,
     registry_name: Optional[str] = None,
     registry_storage: Optional[str] = None,
-    services_on_workers: Optional[bool] = None,
+    workloads_on_workers: Optional[bool] = None,
 ) -> None:
     """
     Create the full environment.
@@ -342,14 +342,14 @@ def create(
     # Load config first to get environment name
     config = get_config(
         config_file, name, domain, workers, control_planes, runtime,
-        local_ip, k8s_version, lb_ports, apps_subdomain, service_presets,
-        metrics_server, enable_service, disable_service,
+        local_ip, k8s_version, lb_ports, apps_subdomain, workload_presets,
+        metrics_server, enable_workload, disable_workload,
         base_dir, expand_vars, k8s_api_port, schedule_on_control,
-        internal_on_control, registry_name, registry_storage, services_on_workers
+        internal_on_control, registry_name, registry_storage, workloads_on_workers
     )
 
     # Validate cluster configuration
-    ensure_single_server_cluster(config.environment.nodes.servers)
+    ensure_single_server_cluster(config.environment.cluster.nodes.servers)
 
     # Validate port availability before creating any resources
     ensure_ports_available(config)
@@ -359,18 +359,18 @@ def create(
     # Run init first
     init(
         config_file, templates_dir, name, domain, workers, control_planes, runtime,
-        local_ip, k8s_version, lb_ports, apps_subdomain, service_presets,
-        metrics_server, enable_service, disable_service,
+        local_ip, k8s_version, lb_ports, apps_subdomain, workload_presets,
+        metrics_server, enable_workload, disable_workload,
         base_dir, expand_vars, k8s_api_port, schedule_on_control,
-        internal_on_control, registry_name, registry_storage, services_on_workers
+        internal_on_control, registry_name, registry_storage, workloads_on_workers
     )
 
     config = get_config(
         config_file, name, domain, workers, control_planes, runtime,
-        local_ip, k8s_version, lb_ports, apps_subdomain, service_presets,
-        metrics_server, enable_service, disable_service,
+        local_ip, k8s_version, lb_ports, apps_subdomain, workload_presets,
+        metrics_server, enable_workload, disable_workload,
         base_dir, expand_vars, k8s_api_port, schedule_on_control,
-        internal_on_control, registry_name, registry_storage, services_on_workers
+        internal_on_control, registry_name, registry_storage, workloads_on_workers
     )
     runner = CommandRunner(config)
 
@@ -383,9 +383,9 @@ def create(
     runner.label_nodes()
     runner.list_nodes()
     runner.setup_wildcard_cert()
-    runner.deploy_services()
-    runner.configure_services()
-    runner.fetch_service_secrets()
+    runner.deploy_workloads()
+    runner.configure_workloads()
+    runner.fetch_workload_secrets()
 
     # Print environment summary
     print_environment_summary(config)
@@ -403,7 +403,7 @@ def destroy(config_file: str = "loko.yaml") -> None:
     runner = CommandRunner(config)
 
     cluster_name = config.environment.name
-    runtime = config.environment.provider.runtime
+    runtime = config.environment.cluster.provider.runtime
 
     # Delete cluster
     runner.delete_cluster()
@@ -481,10 +481,10 @@ def recreate(
     k8s_version: Optional[str] = None,
     lb_ports: Optional[List[int]] = None,
     apps_subdomain: Optional[str] = None,
-    service_presets: Optional[bool] = None,
+    workload_presets: Optional[bool] = None,
     metrics_server: Optional[bool] = None,
-    enable_service: Optional[List[str]] = None,
-    disable_service: Optional[List[str]] = None,
+    enable_workload: Optional[List[str]] = None,
+    disable_workload: Optional[List[str]] = None,
     base_dir: Optional[str] = None,
     expand_vars: Optional[bool] = None,
     k8s_api_port: Optional[int] = None,
@@ -492,7 +492,7 @@ def recreate(
     internal_on_control: Optional[bool] = None,
     registry_name: Optional[str] = None,
     registry_storage: Optional[str] = None,
-    services_on_workers: Optional[bool] = None,
+    workloads_on_workers: Optional[bool] = None,
 ) -> None:
     """
     Recreate the environment (destroy + create).
@@ -503,14 +503,14 @@ def recreate(
     # Load config to get environment name
     config = get_config(
         config_file, name, domain, workers, control_planes, runtime,
-        local_ip, k8s_version, lb_ports, apps_subdomain, service_presets,
-        metrics_server, enable_service, disable_service,
+        local_ip, k8s_version, lb_ports, apps_subdomain, workload_presets,
+        metrics_server, enable_workload, disable_workload,
         base_dir, expand_vars, k8s_api_port, schedule_on_control,
-        internal_on_control, registry_name, registry_storage, services_on_workers
+        internal_on_control, registry_name, registry_storage, workloads_on_workers
     )
 
     # Validate cluster configuration
-    ensure_single_server_cluster(config.environment.nodes.servers)
+    ensure_single_server_cluster(config.environment.cluster.nodes.servers)
 
     console.print(f"[bold blue]Recreating environment '{config.environment.name}'...[/bold blue]\n")
 
@@ -522,10 +522,10 @@ def recreate(
     # Then create
     create(
         config_file, templates_dir, name, domain, workers, control_planes, runtime,
-        local_ip, k8s_version, lb_ports, apps_subdomain, service_presets,
-        metrics_server, enable_service, disable_service,
+        local_ip, k8s_version, lb_ports, apps_subdomain, workload_presets,
+        metrics_server, enable_workload, disable_workload,
         base_dir, expand_vars, k8s_api_port, schedule_on_control,
-        internal_on_control, registry_name, registry_storage, services_on_workers
+        internal_on_control, registry_name, registry_storage, workloads_on_workers
     )
 
 

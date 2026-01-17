@@ -1,6 +1,6 @@
 import pytest
 from ruamel.yaml import YAML
-from loko.updates.yaml_walker import walk_yaml_for_renovate
+from loko.updates.yaml_walker import walk_yaml_for_updater
 
 
 @pytest.fixture
@@ -12,60 +12,60 @@ def yaml_loader():
 
 
 def test_walk_simple_map_with_comment(yaml_loader):
-    """Test walking a simple map with renovate comment."""
+    """Test walking a simple map with loko-updater comment."""
     yaml_content = """
 kubernetes:
   image: kindest/node
-  # renovate: datasource=docker depName=kindest/node
+  # loko-updater: datasource=docker depName=kindest/node
   tag: v1.34.0
 """
     data = yaml_loader.load(yaml_content)
     updates = []
-    walk_yaml_for_renovate(data, updates)
+    walk_yaml_for_updater(data, updates)
 
     assert len(updates) == 1
-    path, key, renovate_info, value, parent = updates[0]
-    assert renovate_info['datasource'] == 'docker'
-    assert renovate_info['depName'] == 'kindest/node'
+    path, key, updater_info, value, parent = updates[0]
+    assert updater_info['datasource'] == 'docker'
+    assert updater_info['depName'] == 'kindest/node'
     assert value == 'v1.34.0'
 
 
 def test_walk_list_with_comment(yaml_loader):
-    """Test walking a list with renovate comment."""
+    """Test walking a list with loko-updater comment."""
     yaml_content = """
 internal-components:
-  # renovate: datasource=helm depName=traefik repositoryUrl=https://traefik.github.io/charts
+  # loko-updater: datasource=helm depName=traefik repositoryUrl=https://traefik.github.io/charts
   - traefik: "37.3.0"
 """
     data = yaml_loader.load(yaml_content)
     updates = []
-    walk_yaml_for_renovate(data, updates)
+    walk_yaml_for_updater(data, updates)
 
     assert len(updates) == 1
-    path, key, renovate_info, value, parent = updates[0]
-    assert renovate_info['datasource'] == 'helm'
-    assert renovate_info['depName'] == 'traefik'
-    assert renovate_info['repositoryUrl'] == 'https://traefik.github.io/charts'
+    path, key, updater_info, value, parent = updates[0]
+    assert updater_info['datasource'] == 'helm'
+    assert updater_info['depName'] == 'traefik'
+    assert updater_info['repositoryUrl'] == 'https://traefik.github.io/charts'
     assert value == '37.3.0'
 
 
 def test_walk_multiple_comments(yaml_loader):
-    """Test walking structure with multiple renovate comments."""
+    """Test walking structure with multiple loko-updater comments."""
     yaml_content = """
 kubernetes:
   image: kindest/node
-  # renovate: datasource=docker depName=kindest/node
+  # loko-updater: datasource=docker depName=kindest/node
   tag: v1.34.0
 
 internal-components:
-  # renovate: datasource=helm depName=traefik repositoryUrl=https://traefik.github.io/charts
+  # loko-updater: datasource=helm depName=traefik repositoryUrl=https://traefik.github.io/charts
   - traefik: "37.3.0"
-  # renovate: datasource=helm depName=metrics-server repositoryUrl=https://kubernetes-sigs.github.io/metrics-server
+  # loko-updater: datasource=helm depName=metrics-server repositoryUrl=https://kubernetes-sigs.github.io/metrics-server
   - metrics-server: "3.12.0"
 """
     data = yaml_loader.load(yaml_content)
     updates = []
-    walk_yaml_for_renovate(data, updates)
+    walk_yaml_for_updater(data, updates)
 
     assert len(updates) == 3
 
@@ -88,25 +88,25 @@ def test_walk_nested_structure(yaml_loader):
 environment:
   kubernetes:
     image: kindest/node
-    # renovate: datasource=docker depName=kindest/node
+    # loko-updater: datasource=docker depName=kindest/node
     tag: v1.34.0
   services:
     system:
       - name: mysql
         config:
           chart: groundhog2k/mysql
-          # renovate: datasource=helm depName=mysql repositoryUrl=https://groundhog2k.github.io/helm-charts
+          # loko-updater: datasource=helm depName=mysql repositoryUrl=https://groundhog2k.github.io/helm-charts
           version: 3.0.7
 """
     data = yaml_loader.load(yaml_content)
     updates = []
-    walk_yaml_for_renovate(data, updates)
+    walk_yaml_for_updater(data, updates)
 
     assert len(updates) == 2
 
 
 def test_walk_no_comments(yaml_loader):
-    """Test walking YAML with no renovate comments."""
+    """Test walking YAML with no loko-updater comments."""
     yaml_content = """
 environment:
   name: test
@@ -116,28 +116,28 @@ environment:
 """
     data = yaml_loader.load(yaml_content)
     updates = []
-    walk_yaml_for_renovate(data, updates)
+    walk_yaml_for_updater(data, updates)
 
     assert len(updates) == 0
 
 
 def test_walk_invalid_comment(yaml_loader):
-    """Test walking with invalid renovate comment (missing required fields)."""
+    """Test walking with invalid loko-updater comment (missing required fields)."""
     yaml_content = """
 kubernetes:
   image: kindest/node
-  # renovate: datasource=docker
+  # loko-updater: datasource=docker
   tag: v1.34.0
 """
     data = yaml_loader.load(yaml_content)
     updates = []
-    walk_yaml_for_renovate(data, updates)
+    walk_yaml_for_updater(data, updates)
 
     # Invalid comment should be ignored
     assert len(updates) == 0
 
 
-def test_walk_non_renovate_comment(yaml_loader):
+def test_walk_non_updater_comment(yaml_loader):
     """Test that regular comments are ignored."""
     yaml_content = """
 kubernetes:
@@ -147,7 +147,7 @@ kubernetes:
 """
     data = yaml_loader.load(yaml_content)
     updates = []
-    walk_yaml_for_renovate(data, updates)
+    walk_yaml_for_updater(data, updates)
 
     assert len(updates) == 0
 
@@ -156,14 +156,14 @@ def test_walk_does_not_duplicate_comments(yaml_loader):
     """Test that comments are not processed multiple times."""
     yaml_content = """
 internal-components:
-  # renovate: datasource=helm depName=traefik repositoryUrl=https://traefik.github.io/charts
+  # loko-updater: datasource=helm depName=traefik repositoryUrl=https://traefik.github.io/charts
   - traefik: "37.3.0"
 """
     data = yaml_loader.load(yaml_content)
     updates = []
 
     # Walk multiple times
-    walk_yaml_for_renovate(data, updates)
+    walk_yaml_for_updater(data, updates)
     initial_count = len(updates)
 
     # Should still have same count (comments tracked via processed_comments set)
@@ -175,6 +175,6 @@ def test_walk_empty_structure(yaml_loader):
     yaml_content = "{}"
     data = yaml_loader.load(yaml_content)
     updates = []
-    walk_yaml_for_renovate(data, updates)
+    walk_yaml_for_updater(data, updates)
 
     assert len(updates) == 0

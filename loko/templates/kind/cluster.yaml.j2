@@ -62,8 +62,8 @@ nodes:
       kubeletExtraArgs:
         # Node taints
         {% set should_taint = True %}
-        {% if nodes.workers == 0 or not nodes.get('internal-components-on-control-plane', False) %}
-          {% if nodes.get('allow-scheduling-on-control-plane', False) %}
+        {% if nodes.workers == 0 or not scheduling.control_plane.isolate_internal_components %}
+          {% if scheduling.control_plane.allow_workloads %}
             {% set should_taint = False %}
           {% endif %}
         {% endif %}
@@ -89,7 +89,7 @@ nodes:
     containerPath: {{ cacert_file }}
   - hostPath: {{ k8s_dir }}/config/containerd
     containerPath: /etc/containerd/certs.d
-{% if nodes.get('labels') or nodes.get('run-services-on-workers-only', False) %}
+{% if nodes.get('labels') or scheduling.workers.isolate_workloads %}
   kubeadmConfigPatches:
   - |
     apiVersion: kubeadm.k8s.io/v1beta4
@@ -107,8 +107,8 @@ nodes:
           {%- endfor -%}
         {%- endif -%}
         "
-        {% if nodes.get('run-services-on-workers-only', False) %}
-        register-with-taints: "node-role=worker:NoSchedule"  # Taint worker nodes when run-services-on-workers-only is true
+        {% if scheduling.workers.isolate_workloads %}
+        register-with-taints: "node-role=worker:NoSchedule"  # Taint worker nodes when isolate_workloads is true
         {% endif %}
 {% endif %}
 {% if not loop.last %}

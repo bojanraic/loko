@@ -58,3 +58,6 @@ htmlcov/
 
 # Mise
 .mise.local.toml
+
+# Todos
+todos.md
