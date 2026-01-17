@@ -23,7 +23,8 @@ console = Console()
 
 def generate_config(
     output: Annotated[str, typer.Option("--output", "-o", help="Output file path")] = "loko.yaml",
-    force: Annotated[bool, typer.Option("--force", "-f", help="Overwrite existing file")] = False
+    force: Annotated[bool, typer.Option("--force", "-f", help="Overwrite existing file")] = False,
+    minimal: Annotated[bool, typer.Option("--minimal", "-m", help="Generate minimal config without comments or disabled sections")] = False
 ) -> None:
     """
     Generate a default configuration file with auto-detected local IP.
@@ -42,7 +43,22 @@ def generate_config(
     # Auto-detect local IP
     detected_ip = _detect_local_ip()
 
-    # Read template and replace IP
+    if minimal:
+        _generate_minimal_config(template_path, output, detected_ip)
+    else:
+        _generate_full_config(template_path, output, detected_ip)
+
+    config_type = "minimal " if minimal else ""
+    console.print(f"[bold green]Generated {config_type}configuration at '{output}'[/bold green]")
+    console.print(f"[cyan]Detected local IP: {detected_ip}[/cyan]")
+    if not minimal:
+        console.print("[dim]You can modify the local-ip setting in the config file if needed.[/dim]")
+    else:
+        console.print("[dim]Use 'loko config generate' without --minimal for full documentation.[/dim]")
+
+
+def _generate_full_config(template_path: Path, output: str, detected_ip: str) -> None:
+    """Generate full config with comments from template."""
     with open(template_path, 'r') as f:
         content = f.read()
 
@@ -53,13 +69,135 @@ def generate_config(
         content
     )
 
-    # Write to output file
     with open(output, 'w') as f:
         f.write(content)
 
-    console.print(f"[bold green]Generated configuration at '{output}'[/bold green]")
-    console.print(f"[cyan]Detected local IP: {detected_ip}[/cyan]")
-    console.print("[dim]You can modify the local-ip setting in the config file if needed.[/dim]")
+
+def _generate_minimal_config(template_path: Path, output: str, detected_ip: str) -> None:
+    """Generate minimal config without comments or disabled sections."""
+    import yaml
+
+    # Load template as YAML (standard yaml, no comment preservation)
+    with open(template_path, 'r') as f:
+        data = yaml.safe_load(f)
+
+    env = data.get('environment', {})
+
+    # Update detected IP
+    if 'network' in env:
+        env['network']['ip'] = detected_ip
+
+    # Use shared compaction logic
+    data = _compact_config_data(data)
+
+    # Write minimal YAML
+    with open(output, 'w') as f:
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+
+
+def _compact_config_data(data: dict) -> dict:
+    """
+    Compact a config data dict by removing comments and disabled sections.
+
+    Args:
+        data: The config data dict (from yaml.safe_load)
+
+    Returns:
+        The compacted config data dict
+    """
+    env = data.get('environment', {})
+
+    # Filter mirroring sources - keep only enabled ones and strip 'enabled' field
+    if 'registry' in env and 'mirroring' in env['registry']:
+        mirroring = env['registry']['mirroring']
+        if 'sources' in mirroring:
+            enabled_sources = []
+            for s in mirroring['sources']:
+                if s.get('enabled', False):
+                    # Keep only the name, strip enabled field
+                    enabled_sources.append({'name': s['name']})
+            mirroring['sources'] = enabled_sources
+
+    # Collect used helm repo refs from enabled workloads
+    used_repos = set()
+
+    # Filter system workloads - keep only enabled ones
+    # Note: 'enabled' field is required on Workload model, cannot be stripped
+    if 'workloads' in env and 'system' in env['workloads']:
+        enabled_system = []
+        for w in env['workloads']['system']:
+            if w.get('enabled', False):
+                # Track used repo ref
+                if 'config' in w and 'repo' in w['config'] and 'ref' in w['config']['repo']:
+                    used_repos.add(w['config']['repo']['ref'])
+                enabled_system.append(w)
+        env['workloads']['system'] = enabled_system
+
+    # Filter user workloads - keep only enabled ones
+    if 'workloads' in env and 'user' in env['workloads']:
+        enabled_user = []
+        for w in env['workloads']['user']:
+            if w.get('enabled', False):
+                if 'config' in w and 'repo' in w['config'] and 'ref' in w['config']['repo']:
+                    used_repos.add(w['config']['repo']['ref'])
+                enabled_user.append(w)
+        env['workloads']['user'] = enabled_user
+
+    # Filter helm-repositories to only include used ones
+    if 'workloads' in env and 'helm-repositories' in env['workloads']:
+        env['workloads']['helm-repositories'] = [
+            repo for repo in env['workloads']['helm-repositories']
+            if repo.get('name') in used_repos
+        ]
+
+    # Remove node labels if present (usually just examples)
+    if 'cluster' in env and 'nodes' in env['cluster']:
+        nodes = env['cluster']['nodes']
+        if 'labels' in nodes:
+            del nodes['labels']
+
+    # Note: metrics-server is required in schema (no default), so we keep it
+
+    return data
+
+
+def config_compact(
+    config_file: ConfigArg = "loko.yaml",
+    output: Annotated[Optional[str], typer.Option("--output", "-o", help="Output file path (default: overwrite input)")] = None,
+) -> None:
+    """
+    Compact an existing configuration file by removing comments and disabled sections.
+
+    This strips comments, disabled workloads, disabled mirroring sources, unused helm
+    repositories, and example node labels to produce a minimal, clean config.
+    """
+    import yaml
+
+    ensure_config_file(config_file)
+
+    # Determine output path
+    output_path = output if output else config_file
+
+    # Load config without comment preservation
+    with open(config_file, 'r') as f:
+        data = yaml.safe_load(f)
+
+    if not data or 'environment' not in data:
+        console.print("[red]Error: Invalid config file structure[/red]")
+        sys.exit(1)
+
+    # Compact the data
+    data = _compact_config_data(data)
+
+    # Write compacted YAML
+    with open(output_path, 'w') as f:
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+
+    if output:
+        console.print(f"[bold green]Compacted configuration written to '{output_path}'[/bold green]")
+    else:
+        console.print(f"[bold green]Configuration '{config_file}' has been compacted[/bold green]")
+    console.print("[dim]Comments and disabled sections have been removed.[/dim]")
 
 
 def detect_ip() -> None:

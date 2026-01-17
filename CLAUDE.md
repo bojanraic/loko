@@ -25,7 +25,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
      - `lifecycle.py` - `init`, `create`, `destroy`, `recreate`, `clean` commands
      - `control.py` - `start`, `stop` commands
      - `status.py` - `status`, `validate` commands
-     - `config.py` - `config generate`, `config detect-ip`, `config validate`, `config port-check`, `config upgrade`, `config helm-repo-add`, `config helm-repo-remove` commands
+     - `config.py` - `config generate`, `config compact`, `config detect-ip`, `config validate`, `config port-check`, `config upgrade`, `config helm-repo-add`, `config helm-repo-remove` commands
      - `workloads.py` - `workload list`, `workload deploy`, `workload undeploy` commands
      - `secrets.py` - `secret fetch`, `secret show` commands
      - `registry.py` - `registry status`, `registry list-repos`, `registry show-repo`, `registry list-tags` commands

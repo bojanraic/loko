@@ -88,6 +88,7 @@ from .commands.config import (
     config_upgrade as config_upgrade_cmd,
     config_validate as config_validate_cmd,
     config_port_check as config_port_check_cmd,
+    config_compact as config_compact_cmd,
     helm_repo_add,
     helm_repo_remove,
 )
@@ -365,12 +366,15 @@ def completion(
 @config_app.command("generate")
 def config_generate_command(
     output: Annotated[str, typer.Option("--output", "-o", help="Output file path")] = "loko.yaml",
-    force: Annotated[bool, typer.Option("--force", "-f", help="Overwrite existing file")] = False
+    force: Annotated[bool, typer.Option("--force", "-f", help="Overwrite existing file")] = False,
+    minimal: Annotated[bool, typer.Option("--minimal", "-m", help="Generate minimal config without comments or disabled sections")] = False
 ):
     """
     Generate a default configuration file with auto-detected local IP.
+
+    Use --minimal to generate a compact config with only enabled sections.
     """
-    config_generate(output, force)
+    config_generate(output, force, minimal)
 
 
 @config_app.command("detect-ip")
@@ -422,6 +426,20 @@ def config_upgrade_command(
     latest versions of components.
     """
     config_upgrade_cmd(config_file)
+
+
+@config_app.command("compact")
+def config_compact_command(
+    config_file: ConfigArg = "loko.yaml",
+    output: Annotated[Optional[str], typer.Option("--output", "-o", help="Output file path (default: overwrite input)")] = None,
+):
+    """
+    Compact an existing configuration file.
+
+    Removes comments, disabled workloads, disabled mirroring sources, unused helm
+    repositories, and example node labels to produce a minimal, clean config.
+    """
+    config_compact_cmd(config_file, output)
 
 
 @config_app.command(name="helm-repo-add")

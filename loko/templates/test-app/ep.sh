@@ -20,13 +20,14 @@ cat > /www/index.html <<EOF
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Loko Test App - Registry & TLS Validation</title>
+    <title>Loko Test App</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 40px; background-color: #f5f5f5; color: #333; transition: background-color 0.3s ease, color 0.3s ease; }
         .container { background-color: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: background-color 0.3s ease, box-shadow 0.3s ease; }
         h1 { color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; transition: color 0.3s ease, border-color 0.3s ease; }
         .info { background-color: #ecf0f1; padding: 15px; border-radius: 5px; margin: 10px 0; transition: background-color 0.3s ease; }
-        .chart-info { background-color: #e8f5e8; border-left: 4px solid #27ae60; }
+        .registry-info { background-color: #e3f2fd; border-left: 4px solid #2196f3; }
+        .deployment-info { background-color: #e0f2f1; border-left: 4px solid #009688; }
         .pod-info { background-color: #fff3cd; border-left: 4px solid #ffc107; }
         .success { background-color: #d4edda; border-left: 4px solid #28a745; }
 
@@ -36,7 +37,8 @@ cat > /www/index.html <<EOF
             .container { background-color: #2d2d2d; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
             h1 { color: #74c0fc; border-bottom-color: #74c0fc; }
             .info { background-color: #404040; }
-            .chart-info { background-color: #1e3a1e; border-left-color: #4caf50; }
+            .registry-info { background-color: #172d3f; border-left-color: #2196f3; }
+            .deployment-info { background-color: #1a3a38; border-left-color: #26a69a; }
             .pod-info { background-color: #3d3317; border-left-color: #ffeb3b; }
             .success { background-color: #1e3a1e; border-left-color: #4caf50; }
         }
@@ -53,13 +55,13 @@ cat > /www/index.html <<EOF
             <p>&#x2705; <strong>Ingress:</strong> Traefik routing configured properly</p>
         </div>
         
-        <div class="info">
+        <div class="info registry-info">
             <h3>Registry Information</h3>
             <p>This Kubernetes workload is running an image hosted in the local container registry within the cluster.</p>
             <p>The image was built and pushed during the validation process.</p>
         </div>
-        
-        <div class="info chart-info">
+
+        <div class="info deployment-info">
             <h3>Deployment Information</h3>
             $APP_INFO
             <p><strong>Namespace:</strong> $NAMESPACE</p>

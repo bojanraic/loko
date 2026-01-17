@@ -119,7 +119,6 @@ releases:
     namespace: kube-system
     version: {{ metrics_server_version }}
     needs:
-      - traefik/traefik
       - registry/registry
     values:
       - args:

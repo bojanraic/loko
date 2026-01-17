@@ -130,6 +130,8 @@ uv run loko --help
 2. Generate a default configuration:
    ```bash
    loko config generate
+   # Or use --minimal for a compact config without comments/disabled sections:
+   # loko config generate --minimal
    ```
 
 3. Initialize your environment:
@@ -180,7 +182,8 @@ Watch Loko in action - see the complete workflow from installation to cluster va
 - `loko completion <shell>` - Generate shell completion script (bash, zsh, fish)
 
 ### Configuration & Secrets
-- `loko config generate` - Generate default loko.yaml with auto-detected local IP
+- `loko config generate` - Generate default loko.yaml with auto-detected local IP (use `--minimal` for compact config without comments)
+- `loko config compact` - Compact existing config by removing comments and disabled sections
 - `loko config detect-ip` - Detect and display the local IP address
 - `loko config validate` - Validate configuration file structure and values
 - `loko config port-check` - Check availability of all configured ports
