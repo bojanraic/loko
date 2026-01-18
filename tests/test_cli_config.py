@@ -1,6 +1,7 @@
 """Tests for config subcommands: validate, port-check, generate, compact, dns-check."""
 import pytest
 import os
+import re
 import yaml
 from unittest.mock import patch, MagicMock
 from typer.testing import CliRunner
@@ -9,6 +10,9 @@ from loko.cli.commands.config import _compact_config_data
 
 
 runner = CliRunner()
+
+# Regex to strip ANSI escape codes
+ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*m')
 
 
 class TestConfigValidate:
@@ -695,8 +699,9 @@ class TestConfigDnsCheck:
         """Test config dns-check shows help."""
         result = runner.invoke(app, ["config", "dns-check", "--help"])
         assert result.exit_code == 0
-        # Check for key terms in output (may be line-wrapped)
-        stdout_normalized = " ".join(result.stdout.lower().split())
+        # Strip ANSI codes and normalize whitespace
+        stdout_clean = ANSI_ESCAPE.sub('', result.stdout)
+        stdout_normalized = " ".join(stdout_clean.lower().split())
         assert "dns" in stdout_normalized
         assert "configuration" in stdout_normalized
-        assert "--config" in result.stdout
+        assert "--config" in stdout_normalized
