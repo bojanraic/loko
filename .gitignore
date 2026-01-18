@@ -61,3 +61,7 @@ htmlcov/
 
 # Todos
 todos.md
+
+# Asciinema related
+docs/demo-*
+docs/demo-*/*

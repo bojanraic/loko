@@ -148,7 +148,7 @@ uv run loko --help
 
 Watch Loko in action - see the complete workflow from installation to cluster validation:
 
-[![asciicast](https://asciinema.org/a/ZU2gJvGoCxTkJeYgGiFdpwe9k.svg)](https://asciinema.org/a/ZU2gJvGoCxTkJeYgGiFdpwe9k)
+[![asciicast](https://asciinema.org/a/BScbf8glbIWscjUo.svg)](https://asciinema.org/a/BScbf8glbIWscjUo)
 
 
 **Demo highlights:**
