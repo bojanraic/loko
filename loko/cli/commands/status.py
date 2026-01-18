@@ -1,5 +1,7 @@
 """Status commands: status, validate."""
 import os
+import platform
+import subprocess
 import sys
 from rich.console import Console
 from rich.table import Table
@@ -125,16 +127,46 @@ def status(config_file: ConfigArg = "loko.yaml") -> None:
         # DNS Service
         console.print("[bold]🔍 DNS Service:[/bold]")
         dns_container = get_dns_container_name(cluster_name)
-        dns_status = runner.list_containers(name_filter=dns_container, format_expr="{{.Names}}\t{{.Status}}", check=False)
-        resolver_port = network.dns_port
-        if dns_status:
-            name, status_str = dns_status[0].split('\t', 1)
-            console.print(f"├── Container: {name}")
-            console.print(f"├── Status: {status_str}")
-            console.print(f"└── Port: {resolver_port}\n")
+        dns_status_list = runner.list_containers(name_filter=dns_container, format_expr="{{.Names}}\t{{.Status}}", check=False)
+
+        # Determine the app domain for DNS info
+        if network.subdomain.enabled:
+            app_domain_dns = f"{network.subdomain.value}.{network.domain}"
         else:
-            console.print(f"├── [yellow]DNS container not running[/yellow]")
-            console.print(f"└── Port: {resolver_port}\n")
+            app_domain_dns = network.domain
+
+        console.print(f"├── Domain: {network.domain}")
+        console.print(f"├── Apps Domain: {app_domain_dns}")
+        console.print(f"├── IP Address: {network.ip}")
+        console.print(f"├── Port: {network.dns_port}")
+
+        if dns_status_list:
+            name, status_str = dns_status_list[0].split('\t', 1)
+            if 'Up' in status_str:
+                console.print(f"├── Container: [green]✓[/green] {name}")
+                console.print(f"├── Status: [green]{status_str}[/green]")
+            else:
+                console.print(f"├── Container: [yellow]⚠[/yellow] {name}")
+                console.print(f"├── Status: [yellow]{status_str}[/yellow]")
+        else:
+            console.print(f"├── Container: [red]✗[/red] Not running")
+
+        # Check resolver file
+        os_name = platform.system()
+        if os_name == "Darwin":
+            resolver_file = f"/etc/resolver/{network.domain}"
+            if os.path.exists(resolver_file):
+                console.print(f"└── Resolver: [green]✓[/green] {resolver_file}\n")
+            else:
+                console.print(f"└── Resolver: [red]✗[/red] Not configured\n")
+        elif os_name == "Linux":
+            resolved_file = f"/etc/systemd/resolved.conf.d/{network.domain}.conf"
+            if os.path.exists(resolved_file):
+                console.print(f"└── Resolver: [green]✓[/green] systemd-resolved\n")
+            else:
+                console.print(f"└── Resolver: [red]✗[/red] Not configured\n")
+        else:
+            console.print(f"└── Resolver: [dim]Unknown ({os_name})[/dim]\n")
 
         # Container Status
         containers_status = runner.list_containers(name_filter=cluster_name, all_containers=True, format_expr="{{.Names}}\t{{.Status}}")

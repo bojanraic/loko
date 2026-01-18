@@ -187,6 +187,7 @@ Watch Loko in action - see the complete workflow from installation to cluster va
 - `loko config detect-ip` - Detect and display the local IP address
 - `loko config validate` - Validate configuration file structure and values
 - `loko config port-check` - Check availability of all configured ports
+- `loko config dns-check` - Check DNS configuration and resolution status
 - `loko config upgrade` - Upgrade component versions using loko-updater comments
 - `loko config helm-repo-add` - Add Helm repositories to config
 - `loko config helm-repo-remove` - Remove Helm repositories from config
@@ -660,6 +661,7 @@ Loko runs a lightweight DNS container on your machine so that services such as `
 ## Troubleshooting
 
 1. **DNS Resolution Issues**
+   - Run DNS diagnostics: `loko config dns-check`
    - Verify local DNS container is running: `loko status`
    - Check DNS configuration: `cat /etc/resolver/<your-domain>`
 

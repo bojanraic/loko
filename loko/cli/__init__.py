@@ -89,6 +89,7 @@ from .commands.config import (
     config_validate as config_validate_cmd,
     config_port_check as config_port_check_cmd,
     config_compact as config_compact_cmd,
+    dns_check as config_dns_check_cmd,
     helm_repo_add,
     helm_repo_remove,
 )
@@ -440,6 +441,20 @@ def config_compact_command(
     repositories, and example node labels to produce a minimal, clean config.
     """
     config_compact_cmd(config_file, output)
+
+
+@config_app.command("dns-check")
+def config_dns_check_command(
+    config_file: ConfigArg = "loko.yaml",
+):
+    """
+    Check DNS configuration and resolution status.
+
+    Displays DNS configuration details (domain, apps domain, port, IP),
+    checks if the DNS container is running, verifies resolver file setup,
+    and tests DNS resolution with a sample query.
+    """
+    config_dns_check_cmd(config_file)
 
 
 @config_app.command(name="helm-repo-add")

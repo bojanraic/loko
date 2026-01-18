@@ -1,7 +1,8 @@
-"""Tests for config subcommands: validate, port-check, generate, compact."""
+"""Tests for config subcommands: validate, port-check, generate, compact, dns-check."""
 import pytest
 import os
 import yaml
+from unittest.mock import patch, MagicMock
 from typer.testing import CliRunner
 from loko.cli import app
 from loko.cli.commands.config import _compact_config_data
@@ -560,3 +561,142 @@ class TestCompactConfigData:
         data = {"environment": {}}
         result = _compact_config_data(data)
         assert result == {"environment": {}}
+
+
+class TestConfigDnsCheck:
+    """Tests for loko config dns-check command."""
+
+    def test_config_dns_check_with_missing_config(self, temp_dir):
+        """Test config dns-check with non-existent config file."""
+        missing_path = os.path.join(temp_dir, "nonexistent.yaml")
+        result = runner.invoke(app, ["config", "dns-check", "--config", missing_path])
+        assert result.exit_code == 1
+        assert "not found" in result.stdout.lower()
+
+    @patch('loko.cli.commands.config.CommandRunner')
+    def test_config_dns_check_shows_dns_configuration(self, mock_runner_class, mock_config_path):
+        """Test config dns-check displays DNS configuration details."""
+        # Mock the CommandRunner
+        mock_runner = MagicMock()
+        mock_runner.list_containers.return_value = []
+        mock_runner_class.return_value = mock_runner
+
+        result = runner.invoke(app, ["config", "dns-check", "--config", mock_config_path])
+
+        # Should show DNS configuration section
+        assert "DNS Configuration" in result.stdout
+        assert "Domain:" in result.stdout
+        assert "loko.local" in result.stdout  # From mock config
+        assert "Apps Domain:" in result.stdout
+        assert "DNS Port:" in result.stdout
+        assert "IP Address:" in result.stdout
+
+    @patch('loko.cli.commands.config.CommandRunner')
+    def test_config_dns_check_shows_container_status_running(self, mock_runner_class, mock_config_path):
+        """Test config dns-check shows running container status."""
+        mock_runner = MagicMock()
+        mock_runner.list_containers.return_value = ["test-cluster-dns\tUp 2 hours"]
+        mock_runner_class.return_value = mock_runner
+
+        result = runner.invoke(app, ["config", "dns-check", "--config", mock_config_path])
+
+        assert "DNS Container Status" in result.stdout
+        assert "test-cluster-dns" in result.stdout
+        assert "Up" in result.stdout
+
+    @patch('loko.cli.commands.config.CommandRunner')
+    def test_config_dns_check_shows_container_not_running(self, mock_runner_class, mock_config_path):
+        """Test config dns-check shows container not running."""
+        mock_runner = MagicMock()
+        mock_runner.list_containers.return_value = []
+        mock_runner_class.return_value = mock_runner
+
+        result = runner.invoke(app, ["config", "dns-check", "--config", mock_config_path])
+
+        assert "DNS Container Status" in result.stdout
+        assert "not found" in result.stdout.lower()
+
+    @patch('loko.cli.commands.config.CommandRunner')
+    def test_config_dns_check_shows_apps_domain_with_subdomain(self, mock_runner_class, mock_config_path):
+        """Test config dns-check shows apps domain correctly when subdomain is enabled."""
+        mock_runner = MagicMock()
+        mock_runner.list_containers.return_value = []
+        mock_runner_class.return_value = mock_runner
+
+        result = runner.invoke(app, ["config", "dns-check", "--config", mock_config_path])
+
+        # mock_config_path has subdomain enabled with value "apps"
+        assert "apps.loko.local" in result.stdout
+
+    @patch('loko.cli.commands.config.CommandRunner')
+    def test_config_dns_check_shows_resolver_section(self, mock_runner_class, mock_config_path):
+        """Test config dns-check shows resolver configuration section."""
+        mock_runner = MagicMock()
+        mock_runner.list_containers.return_value = []
+        mock_runner_class.return_value = mock_runner
+
+        result = runner.invoke(app, ["config", "dns-check", "--config", mock_config_path])
+
+        assert "Resolver Configuration" in result.stdout
+
+    @patch('loko.cli.commands.config.CommandRunner')
+    def test_config_dns_check_shows_resolution_test_section(self, mock_runner_class, mock_config_path):
+        """Test config dns-check shows DNS resolution test section."""
+        mock_runner = MagicMock()
+        mock_runner.list_containers.return_value = []
+        mock_runner_class.return_value = mock_runner
+
+        result = runner.invoke(app, ["config", "dns-check", "--config", mock_config_path])
+
+        assert "DNS Resolution Test" in result.stdout
+
+    @patch('loko.cli.commands.config.CommandRunner')
+    @patch('loko.cli.commands.config.subprocess.run')
+    def test_config_dns_check_successful_resolution(self, mock_subprocess, mock_runner_class, mock_config_path):
+        """Test config dns-check with successful DNS resolution."""
+        mock_runner = MagicMock()
+        mock_runner.list_containers.return_value = ["test-cluster-dns\tUp 2 hours"]
+        mock_runner_class.return_value = mock_runner
+
+        # Mock successful dig response
+        mock_subprocess.return_value = MagicMock(
+            returncode=0,
+            stdout="127.0.0.1\n",
+            stderr=""
+        )
+
+        result = runner.invoke(app, ["config", "dns-check", "--config", mock_config_path])
+
+        assert "registry.loko.local" in result.stdout
+        assert "correct" in result.stdout.lower() or "127.0.0.1" in result.stdout
+
+    @patch('loko.cli.commands.config.ensure_docker_running')
+    @patch('loko.cli.commands.config.CommandRunner')
+    @patch('loko.cli.commands.config.subprocess.run')
+    def test_config_dns_check_failed_resolution(self, mock_subprocess, mock_runner_class, mock_docker, mock_config_path):
+        """Test config dns-check with failed DNS resolution."""
+        mock_runner = MagicMock()
+        mock_runner.list_containers.return_value = []
+        mock_runner_class.return_value = mock_runner
+
+        # Mock failed dig response
+        mock_subprocess.return_value = MagicMock(
+            returncode=1,
+            stdout="",
+            stderr="connection timed out"
+        )
+
+        result = runner.invoke(app, ["config", "dns-check", "--config", mock_config_path])
+
+        # Should indicate failure or no response
+        assert "DNS Resolution Test" in result.stdout
+
+    def test_config_dns_check_help(self):
+        """Test config dns-check shows help."""
+        result = runner.invoke(app, ["config", "dns-check", "--help"])
+        assert result.exit_code == 0
+        # Check for key terms in output (may be line-wrapped)
+        stdout_normalized = " ".join(result.stdout.lower().split())
+        assert "dns" in stdout_normalized
+        assert "configuration" in stdout_normalized
+        assert "--config" in result.stdout
