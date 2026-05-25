@@ -1,5 +1,5 @@
 # Use the smallest possible base image (BusyBox)
-FROM busybox:1.37.0-uclibc
+FROM busybox:1.38.0-uclibc
 
 # Create the directory for the web files
 RUN mkdir -p /www
